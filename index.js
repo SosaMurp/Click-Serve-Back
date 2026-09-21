@@ -2,12 +2,19 @@ const bcrypt = require('bcrypt');
 const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const { randomUUID } = require('crypto');
+const multer = require('multer');
 const pool = require('./config/db');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 const authMiddleware = require('./middleware/authMiddleware');
 
 const app = express();
+const biometricUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 2 },
+});
+const biometricServiceUrl = process.env.BIOMETRIC_SERVICE_URL || 'http://127.0.0.1:8000';
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -21,10 +28,228 @@ const transporter = nodemailer.createTransport({
 app.use(cors());
 app.use(express.json());
 
+const requestUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 5 },
+});
+
 // La conexión a PostgreSQL ahora se importa desde config/db.js
 
 app.get('/', (req, res) => {
   res.send('Servidor Backend de Click & Serve funcionando 🚀');
+});
+
+// ==========================================
+// SOLICITUDES DE SERVICIO
+// ==========================================
+app.post('/api/solicitudes', authMiddleware, requestUpload.array('imagenes', 5), async (req, res) => {
+  const { categoria, descripcion, direccion, fecha_preferida, hora_preferida, id_tecnico } = req.body;
+  if (!descripcion?.trim() || !direccion?.trim()) {
+    return res.status(400).json({ error: 'La descripción y la dirección son obligatorias.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const folio = `SRV-${Date.now().toString(36).toUpperCase()}`;
+    const solicitud = await client.query(
+      `INSERT INTO solicitudes_servicio
+       (folio, id_usuario, id_tecnico, categoria, descripcion, direccion, fecha_preferida, hora_preferida, estado)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDIENTE')
+       RETURNING id_solicitud, folio, estado, fecha_creacion`,
+      [folio, req.user.id_usuario, id_tecnico || null, categoria || null, descripcion.trim(), direccion.trim(), fecha_preferida || null, hora_preferida || null]
+    );
+
+    for (const image of req.files || []) {
+      await client.query(
+        `INSERT INTO solicitud_imagenes (id_solicitud, nombre, tipo_mime, contenido)
+         VALUES ($1, $2, $3, $4)`,
+        [solicitud.rows[0].id_solicitud, image.originalname, image.mimetype, image.buffer]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ mensaje: 'Solicitud creada correctamente.', solicitud: solicitud.rows[0] });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error al crear solicitud:', error);
+    res.status(500).json({ error: 'No se pudo crear la solicitud de servicio.' });
+  } finally {
+    client.release();
+  }
+});
+
+// ==========================================
+// HISTORIAL DEL CLIENTE
+// ==========================================
+app.get('/api/solicitudes/cliente', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+            `SELECT id_solicitud, folio, categoria, descripcion, direccion,
+              fecha_preferida, hora_preferida, estado, fecha_creacion, id_tecnico,
+              calificacion, comentario_calificacion
+       FROM solicitudes_servicio
+       WHERE id_usuario = $1
+       ORDER BY fecha_creacion DESC`,
+      [req.user.id_usuario]
+    );
+    res.status(200).json({ solicitudes: result.rows });
+  } catch (error) {
+    console.error('Error al obtener solicitudes del cliente:', error);
+    res.status(500).json({ error: 'No se pudieron obtener tus solicitudes.' });
+  }
+});
+
+// ==========================================
+// SOLICITUDES PARA EL TECNICO
+// ==========================================
+app.get('/api/solicitudes/tecnico', authMiddleware, async (req, res) => {
+  if (req.user.id_rol !== 2) {
+    return res.status(403).json({ error: 'Solo los técnicos pueden consultar solicitudes de trabajo.' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT s.id_solicitud, s.folio, s.categoria, s.descripcion, s.direccion,
+              s.fecha_preferida, s.hora_preferida, s.estado, s.fecha_creacion,
+              s.id_usuario, u.nombre AS cliente_nombre, u.apellido AS cliente_apellido
+       FROM solicitudes_servicio s
+       JOIN usuarios u ON u.id_usuario = s.id_usuario
+      WHERE s.estado = 'PENDIENTE' OR (s.id_tecnico = $1 AND s.estado IN ('ASIGNADA', 'EN_CAMINO', 'EN_PROCESO'))
+       ORDER BY s.fecha_creacion ASC`,
+      [req.user.id_usuario]
+    );
+    res.status(200).json({ solicitudes: result.rows });
+  } catch (error) {
+    console.error('Error al obtener solicitudes para técnico:', error);
+    res.status(500).json({ error: 'No se pudieron obtener solicitudes disponibles.' });
+  }
+});
+
+// ==========================================
+// ACEPTAR O RECHAZAR SOLICITUD
+// ==========================================
+app.patch('/api/solicitudes/:id/estado', authMiddleware, async (req, res) => {
+  if (req.user.id_rol !== 2) {
+    return res.status(403).json({ error: 'Solo los técnicos pueden cambiar el estado de una solicitud.' });
+  }
+
+  const estadoSolicitado = String(req.body?.estado || '').toUpperCase();
+  if (!['ASIGNADA', 'EN_CAMINO', 'EN_PROCESO', 'FINALIZADA', 'CANCELADA'].includes(estadoSolicitado)) {
+    return res.status(400).json({ error: 'Estado de transición no válido.' });
+  }
+
+  try {
+    let result;
+    if (estadoSolicitado === 'ASIGNADA') {
+      result = await pool.query(
+        `UPDATE solicitudes_servicio
+         SET id_tecnico = $1, estado = 'ASIGNADA'
+         WHERE id_solicitud = $2 AND estado = 'PENDIENTE'
+         RETURNING id_solicitud, folio, estado, id_tecnico`,
+        [req.user.id_usuario, req.params.id]
+      );
+    } else if (estadoSolicitado === 'CANCELADA') {
+      result = await pool.query(
+        `UPDATE solicitudes_servicio
+         SET estado = $1
+         WHERE id_solicitud = $2 AND estado IN ('PENDIENTE', 'ASIGNADA', 'EN_CAMINO', 'EN_PROCESO')
+         RETURNING id_solicitud, folio, estado, id_tecnico`,
+        [estadoSolicitado, req.params.id]
+      );
+    } else {
+      const transition = await pool.query(
+        `UPDATE solicitudes_servicio
+         SET estado = $1
+         WHERE id_solicitud = $2 AND id_tecnico = $3
+           AND estado IN ('ASIGNADA', 'EN_CAMINO', 'EN_PROCESO')
+         RETURNING id_solicitud, folio, estado, id_tecnico`,
+        [estadoSolicitado, req.params.id, req.user.id_usuario]
+      );
+      if (transition.rows.length === 0) {
+        return res.status(409).json({ error: 'La solicitud no está asignada a ti o la transición no es válida.' });
+      }
+      return res.status(200).json({ mensaje: 'Estado actualizado correctamente.', solicitud: transition.rows[0] });
+    }
+
+    if (result.rows.length === 0) {
+      return res.status(409).json({ error: 'La solicitud ya fue atendida o no existe.' });
+    }
+    res.status(200).json({ mensaje: 'Estado actualizado correctamente.', solicitud: result.rows[0] });
+  } catch (error) {
+    console.error('Error al actualizar estado de solicitud:', error);
+    res.status(500).json({ error: 'No se pudo actualizar la solicitud.' });
+  }
+});
+
+// ==========================================
+// CHAT Y CALIFICACION DE SERVICIO
+// ==========================================
+app.get('/api/solicitudes/:id/chat', authMiddleware, async (req, res) => {
+  try {
+    const access = await pool.query(
+      `SELECT id_usuario, id_tecnico FROM solicitudes_servicio
+       WHERE id_solicitud = $1 AND (id_usuario = $2 OR id_tecnico = $2)`,
+      [req.params.id, req.user.id_usuario]
+    );
+    if (access.rows.length === 0) return res.status(403).json({ error: 'No tienes acceso a este chat.' });
+    const messages = await pool.query(
+      `SELECT m.id, m.id_solicitud, m.id_emisor, m.mensaje, m.fecha_envio,
+              u.nombre AS emisor_nombre, u.apellido AS emisor_apellido
+       FROM mensajes_chat m JOIN usuarios u ON u.id_usuario = m.id_emisor
+       WHERE m.id_solicitud = $1 ORDER BY m.fecha_envio ASC`,
+      [req.params.id]
+    );
+    res.status(200).json({ mensajes: messages.rows });
+  } catch (error) {
+    console.error('Error al obtener chat:', error);
+    res.status(500).json({ error: 'No se pudo cargar la conversación.' });
+  }
+});
+
+app.post('/api/solicitudes/:id/chat', authMiddleware, async (req, res) => {
+  const mensaje = String(req.body?.mensaje || '').trim();
+  if (!mensaje) return res.status(400).json({ error: 'El mensaje no puede estar vacío.' });
+  try {
+    const access = await pool.query(
+      `SELECT id_usuario, id_tecnico FROM solicitudes_servicio
+       WHERE id_solicitud = $1 AND (id_usuario = $2 OR id_tecnico = $2)`,
+      [req.params.id, req.user.id_usuario]
+    );
+    if (access.rows.length === 0) return res.status(403).json({ error: 'No tienes acceso a este chat.' });
+    const result = await pool.query(
+      `INSERT INTO mensajes_chat (id_solicitud, id_emisor, mensaje)
+       VALUES ($1, $2, $3)
+       RETURNING id, id_solicitud, id_emisor, mensaje, fecha_envio`,
+      [req.params.id, req.user.id_usuario, mensaje]
+    );
+    res.status(201).json({ mensaje: result.rows[0] });
+  } catch (error) {
+    console.error('Error al enviar mensaje:', error);
+    res.status(500).json({ error: 'No se pudo enviar el mensaje.' });
+  }
+});
+
+app.post('/api/solicitudes/:id/calificar', authMiddleware, async (req, res) => {
+  const calificacion = Number(req.body?.calificacion);
+  const comentario = req.body?.comentario ? String(req.body.comentario).trim() : null;
+  if (!Number.isInteger(calificacion) || calificacion < 1 || calificacion > 5) {
+    return res.status(400).json({ error: 'La calificación debe ser un entero entre 1 y 5.' });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE solicitudes_servicio
+       SET calificacion = $1, comentario_calificacion = $2
+       WHERE id_solicitud = $3 AND id_usuario = $4 AND estado = 'FINALIZADA'
+       RETURNING id_solicitud, folio, calificacion, comentario_calificacion`,
+      [calificacion, comentario, req.params.id, req.user.id_usuario]
+    );
+    if (result.rows.length === 0) return res.status(409).json({ error: 'La solicitud no está finalizada o ya no está disponible.' });
+    res.status(200).json({ mensaje: 'Calificación guardada.', solicitud: result.rows[0] });
+  } catch (error) {
+    console.error('Error al guardar calificación:', error);
+    res.status(500).json({ error: 'No se pudo guardar la calificación.' });
+  }
 });
 
 // ==========================================
@@ -107,8 +332,12 @@ app.post('/api/login', async (req, res) => {
 
     if (!contraseñaValida) return res.status(401).json({ error: 'Correo o contraseña incorrectos.' });
 
-    if (usuario.estado_cuenta === 'No verificado') {
-      return res.status(403).json({ error: 'Por favor, verifica tu cuenta con el código de 4 dígitos enviado a tu correo antes de iniciar sesión.' });
+    if (['No verificado', 'PENDIENTE', 'Pendiente', 'pendiente'].includes(usuario.estado_cuenta)) {
+      return res.status(403).json({
+        codigo: 'CUENTA_PENDIENTE',
+        estado_cuenta: 'PENDIENTE',
+        error: 'Tu cuenta está PENDIENTE de validación. Verifica tu cuenta antes de iniciar sesión.'
+      });
     }
 
     delete usuario.contrasena;
@@ -437,6 +666,50 @@ app.post('/api/check-session', async (req, res) => {
 });
 
 // ==========================================
+// RUTA 8.5: INICIAR VERIFICACIÓN BIOMÉTRICA
+// ==========================================
+app.post('/api/biometria/solicitar', authMiddleware, async (req, res) => {
+  try {
+    const desafio = randomUUID();
+    const resultado = await pool.query(
+      `INSERT INTO verificaciones_biometricas (id_usuario, desafio, proveedor)
+       VALUES ($1, $2, 'opencv')
+       RETURNING id_verificacion, desafio, proveedor, estado, fecha_expiracion`,
+      [req.user.id_usuario, desafio]
+    );
+
+    res.status(201).json({ verificacion: resultado.rows[0] });
+  } catch (error) {
+    console.error('Error al iniciar verificación biométrica:', error);
+    res.status(500).json({ error: 'No se pudo iniciar la verificación biométrica.' });
+  }
+});
+
+// ==========================================
+// RUTA 8.6: CONSULTAR VERIFICACIÓN BIOMÉTRICA
+// ==========================================
+app.get('/api/biometria/:idVerificacion', authMiddleware, async (req, res) => {
+  try {
+    const resultado = await pool.query(
+      `SELECT id_verificacion, proveedor, estado, resultado,
+              fecha_creacion, fecha_expiracion, fecha_resolucion
+       FROM verificaciones_biometricas
+       WHERE id_verificacion = $1 AND id_usuario = $2`,
+      [req.params.idVerificacion, req.user.id_usuario]
+    );
+
+    if (resultado.rows.length === 0) {
+      return res.status(404).json({ error: 'Verificación biométrica no encontrada.' });
+    }
+
+    res.status(200).json({ verificacion: resultado.rows[0] });
+  } catch (error) {
+    console.error('Error al consultar verificación biométrica:', error);
+    res.status(500).json({ error: 'No se pudo consultar la verificación biométrica.' });
+  }
+});
+
+// ==========================================
 // RUTA 9: RUTA PROTEGIDA DE EJEMPLO (/api/perfil-protegido)
 // ==========================================
 app.get('/api/perfil-protegido', authMiddleware, async (req, res) => {
@@ -540,8 +813,12 @@ app.post('/api/login-admin', async (req, res) => {
       return res.status(403).json({ error: 'Acceso denegado. Credenciales no válidas para el panel web administrativo.' });
     }
 
-    if (usuario.estado_cuenta === 'No verificado') {
-      return res.status(403).json({ error: 'Tu cuenta administrativa aún no está verificada.' });
+    if (['No verificado', 'PENDIENTE', 'Pendiente', 'pendiente'].includes(usuario.estado_cuenta)) {
+      return res.status(403).json({
+        codigo: 'CUENTA_PENDIENTE',
+        estado_cuenta: 'PENDIENTE',
+        error: 'Tu cuenta administrativa está PENDIENTE de validación. Verifica tu cuenta antes de iniciar sesión.'
+      });
     }
 
     // Generar código de 6 dígitos para mayor seguridad en 2FA
@@ -696,3 +973,69 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en el puerto ${PORT}`);
 });
+
+// ==========================================
+// RUTA 8.7: COMPARAR CAPTURA FACIAL
+// ==========================================
+app.post(
+  '/api/biometria/:idVerificacion/compare',
+  authMiddleware,
+  biometricUpload.fields([
+    { name: 'reference_image', maxCount: 1 },
+    { name: 'live_image', maxCount: 1 },
+  ]),
+  async (req, res) => {
+    const reference = req.files?.reference_image?.[0];
+    const live = req.files?.live_image?.[0];
+
+    if (!reference || !live) {
+      return res.status(400).json({ error: 'Se requieren reference_image y live_image.' });
+    }
+
+    try {
+      const form = new FormData();
+      form.append('reference_image', new Blob([reference.buffer], { type: reference.mimetype }), reference.originalname);
+      form.append('live_image', new Blob([live.buffer], { type: live.mimetype }), live.originalname);
+
+      const modelResponse = await fetch(`${biometricServiceUrl}/compare`, {
+        method: 'POST',
+        body: form,
+      });
+      const modelResult = await modelResponse.json();
+
+      if (!modelResponse.ok) {
+        return res.status(422).json({ error: modelResult.detail || 'No se pudo comparar el rostro.' });
+      }
+
+      const aprobado = modelResult.match === true;
+      const estado = aprobado ? 'APROBADO' : 'RECHAZADO';
+      const resultado = await pool.query(
+        `UPDATE verificaciones_biometricas
+         SET estado = $1, resultado = $2::jsonb, fecha_resolucion = NOW()
+         WHERE id_verificacion = $3 AND id_usuario = $4
+         RETURNING id_verificacion, estado, resultado, fecha_resolucion`,
+        [estado, JSON.stringify(modelResult), req.params.idVerificacion, req.user.id_usuario]
+      );
+
+      if (resultado.rows.length === 0) {
+        return res.status(404).json({ error: 'Verificación biométrica no encontrada.' });
+      }
+
+      await pool.query(
+        'UPDATE usuarios SET biometria_estado = $1, fecha_actualizacion = NOW() WHERE id_usuario = $2',
+        [estado === 'APROBADO' ? 'verificada' : 'rechazada', req.user.id_usuario]
+      );
+
+      res.status(200).json({
+        ...resultado.rows[0],
+        estado: aprobado ? 'APROBADO' : 'RECHAZADO',
+        match: aprobado,
+        distance: modelResult.distance,
+        confidence: modelResult.confidence,
+      });
+    } catch (error) {
+      console.error('Error al comparar biometría:', error);
+      res.status(502).json({ error: 'El servicio biométrico no está disponible.' });
+    }
+  }
+);

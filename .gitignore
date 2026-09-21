@@ -1,0 +1,5 @@
+node_modules/
+.env
+schema-report.json
+schema-after-ddl-edit.json
+check_psql.bat
