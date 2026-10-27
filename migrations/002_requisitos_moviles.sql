@@ -103,8 +103,11 @@ CREATE TABLE IF NOT EXISTS retos_2fa (
     expira TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '3 minutes'),
     fecha_creacion TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE retos_2fa ADD COLUMN IF NOT EXISTS codigo_hash TEXT;
 
 ALTER TABLE tokens_temporales ADD COLUMN IF NOT EXISTS canal VARCHAR(10) DEFAULT 'EMAIL';
+ALTER TABLE tokens_temporales ADD COLUMN IF NOT EXISTS reset_token UUID;
+ALTER TABLE tokens_temporales ADD COLUMN IF NOT EXISTS fecha_verificacion TIMESTAMPTZ;
 ALTER TABLE tokens_temporales ADD COLUMN IF NOT EXISTS intentos SMALLINT NOT NULL DEFAULT 0;
 
 -- ───────────────────────── Solicitudes ─────────────────────────
@@ -247,7 +250,7 @@ CREATE TABLE IF NOT EXISTS portafolio_tecnico (
     fecha_creacion TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS documentos_tecnico (
+CREATE TABLE IF NOT EXISTS documentos_usuario (
     id_documento BIGSERIAL PRIMARY KEY,
     id_usuario INTEGER NOT NULL REFERENCES usuarios(id_usuario) ON DELETE CASCADE,
     tipo VARCHAR(25) NOT NULL CHECK (tipo IN ('INE_FRENTE', 'INE_REVERSO', 'ROSTRO', 'CEDULA', 'CERTIFICACION', 'COMPROBANTE_DOMICILIO', 'ANTECEDENTES')),

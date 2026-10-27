@@ -29,6 +29,7 @@ function createApp() {
 
   app.use(require('./routes/archivos'));
   app.use(require('./routes/auth'));
+  app.use(require('./routes/cuenta'));
 
   // Rutas del index.js original que aún no se portan.
   registerLegacy(app);
