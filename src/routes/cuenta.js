@@ -84,8 +84,14 @@ router.post('/api/usuario/push-token', auth, async (req, res) => {
 
 // ───────────────────────── 2FA con app autenticadora (RF-13, RNF-04) ─────────────────────────
 router.post('/api/usuarios/2fa/iniciar', auth, async (req, res) => {
+  // Con 2FA activa, reemplazar el secreto exigiría solo la sesión: primero hay que desactivarla,
+  // lo que pide el código actual o la contraseña.
   const secreto = generateSecret();
-  await getPool().query('UPDATE usuarios SET totp_pendiente = $1 WHERE id_usuario = $2', [secreto, req.user.id_usuario]);
+  const { rowCount } = await getPool().query(
+    'UPDATE usuarios SET totp_pendiente = $1 WHERE id_usuario = $2 AND "2FA_Activo" IS NOT TRUE',
+    [secreto, req.user.id_usuario]
+  );
+  if (!rowCount) return fail(res, 409, 'TWO_FA_ACTIVE', 'La verificación en dos pasos ya está activa. Desactívala primero para configurar otro teléfono.');
   return res.json({ secreto, otpauth: otpauthUri(secreto, req.user.correo) });
 });
 

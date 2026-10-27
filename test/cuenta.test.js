@@ -156,6 +156,20 @@ test('2FA: activar con app autenticadora y entrar con el código', async () => {
   assert.ok(step2.body.token);
 });
 
+test('2FA: con la verificación ya activa no se puede cambiar el secreto sin desactivarla antes', async () => {
+  const user = await createUser();
+  const token = await login(server.url, user);
+  const secreto = generateSecret();
+  await getPool().query('UPDATE usuarios SET totp_secreto = $1, "2FA_Activo" = true WHERE id_usuario = $2', [secreto, user.id]);
+  const ini = await api(server.url, 'POST', '/api/usuarios/2fa/iniciar', { token });
+  assert.equal(ini.status, 409);
+  assert.equal(ini.body.code, 'TWO_FA_ACTIVE');
+  assert.equal(ini.body.secreto, undefined);
+  const { rows } = await getPool().query('SELECT totp_secreto, totp_pendiente FROM usuarios WHERE id_usuario = $1', [user.id]);
+  assert.equal(rows[0].totp_secreto, secreto);
+  assert.equal(rows[0].totp_pendiente, null);
+});
+
 test('2FA: tres códigos incorrectos destruyen el reto', async () => {
   const user = await createUser();
   const secreto = generateSecret();
