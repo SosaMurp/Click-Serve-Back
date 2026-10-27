@@ -37,11 +37,12 @@ router.put('/api/tecnico/disponibilidad', ...techOnly, async (req, res, next) =>
 
 router.post('/api/tecnico/latido', ...techOnly, async (req, res) => {
   const { lat, lng } = locationParams(req.body);
+  // Una cuenta que dejó de estar aprobada (suspendida, en revisión) sale de línea en su siguiente latido.
   const { rows } = await db().query(
-    `UPDATE usuarios SET ultimo_latido = NOW(), ultima_conexion = NOW(),
+    `UPDATE usuarios SET ultimo_latido = NOW(), ultima_conexion = NOW(), disponible = (disponible AND $4::boolean),
        latitud = COALESCE($1, latitud), longitud = COALESCE($2, longitud)
      WHERE id_usuario = $3 RETURNING disponible`,
-    [lat, lng, req.user.id_usuario]
+    [lat, lng, req.user.id_usuario, req.user.aprobado]
   );
   res.json({ ok: true, disponible: rows[0].disponible });
 });
@@ -81,6 +82,7 @@ router.get('/api/tecnicos/cercanos', auth, async (req, res) => {
             (SELECT ROUND(AVG(q.puntuacion_tecnico)::numeric, 1) FROM calificaciones_servicio q WHERE q.id_tecnico = u.id_usuario AND q.puntuacion_tecnico IS NOT NULL) AS calificacion
      FROM usuarios u
      WHERE u.id_rol = 2 AND u.anonimizado = false AND u.identidad_verificada = true AND u.disponible = true
+       AND UPPER(COALESCE(u.estado_cuenta, '')) IN ('ACTIVO', 'APROBADO')
        AND u.ultimo_latido > NOW() - INTERVAL '90 seconds' AND u.latitud IS NOT NULL
      ORDER BY POWER(u.latitud - $1, 2) + POWER(u.longitud - $2, 2) LIMIT 20`,
     [lat, lng]

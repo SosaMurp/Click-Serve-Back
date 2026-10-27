@@ -227,6 +227,7 @@ router.post('/api/solicitudes/:id/proponer-tecnico', auth, requireRole(ROL.CLIEN
     if (row.estado !== 'PENDIENTE') throw new HttpError(409, 'INVALID_STATE', 'La solicitud ya tiene técnico asignado.');
     const tech = await tx.query(
       `SELECT id_usuario FROM usuarios WHERE id_usuario = $1 AND id_rol = 2 AND disponible = true AND identidad_verificada = true
+         AND anonimizado = false AND UPPER(COALESCE(estado_cuenta, '')) IN ('ACTIVO', 'APROBADO')
          AND ultimo_latido > NOW() - INTERVAL '90 seconds'`,
       [idTecnico]
     );

@@ -109,6 +109,20 @@ test('si el folio generado ya existe, se genera otro en vez de fallar', async ()
   }
 });
 
+test('un técnico suspendido no se puede proponer y su latido lo deja fuera de línea', async () => {
+  const c = await cliente();
+  const t = await tecnico();
+  const s = (await crearSolicitud(c.token)).body.solicitud;
+  await getPool().query("UPDATE usuarios SET estado_cuenta = 'SUSPENDIDO' WHERE id_usuario = $1", [t.id]);
+  const prop = await api(server.url, 'POST', `/api/solicitudes/${s.id_solicitud}/proponer-tecnico`, { token: c.token, body: { id_tecnico: t.id } });
+  assert.equal(prop.status, 409);
+  assert.equal(prop.body.code, 'TECH_UNAVAILABLE');
+  const cerca = await api(server.url, 'GET', '/api/tecnicos/cercanos?latitud=17.96&longitud=-102.2', { token: c.token });
+  assert.equal(cerca.body.tecnicos.some((x) => x.id_usuario === t.id), false);
+  const latido = await api(server.url, 'POST', '/api/tecnico/latido', { token: t.token, body: {} });
+  assert.equal(latido.body.disponible, false);
+});
+
 test('un cliente pendiente de aprobación no puede crear solicitudes', async () => {
   const c = await cliente({ aprobado: false });
   const res = await crearSolicitud(c.token);
