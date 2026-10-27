@@ -293,3 +293,14 @@ CREATE TABLE IF NOT EXISTS soporte_mensajes (
     fecha_envio TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS soporte_mensajes_ticket_idx ON soporte_mensajes (id_ticket, fecha_envio);
+
+-- ───────────────────────── Liquidación al técnico (RD-013, RNF-37/39) ─────────────────────────
+-- total cobrado (IVA incluido) − comisión Click & Serve 10 % − retención ISR 2.1 % y IVA 8 % sobre la base sin IVA.
+CREATE OR REPLACE FUNCTION cs_liquidacion(p_total NUMERIC)
+RETURNS TABLE (total NUMERIC, comision NUMERIC, base NUMERIC, retencion_isr NUMERIC, retencion_iva NUMERIC, neto_tecnico NUMERIC)
+LANGUAGE sql IMMUTABLE AS $$
+    WITH v AS (SELECT ROUND(p_total, 2) AS t, ROUND(ROUND(p_total, 2) / 1.16, 2) AS b)
+    SELECT t, ROUND(t * 0.10, 2), b, ROUND(b * 0.021, 2), ROUND(b * 0.08, 2),
+           t - ROUND(t * 0.10, 2) - ROUND(b * 0.021, 2) - ROUND(b * 0.08, 2)
+    FROM v
+$$;
