@@ -392,6 +392,7 @@ router.delete('/api/auth/sessions', auth, async (req, res) => {
 });
 
 router.post('/api/check-session', auth, (req, res) => res.json({ valid: true }));
+router.get('/api/perfil-protegido', auth, (req, res) => res.json({ mensaje: 'Acceso concedido a ruta protegida', usuarioId: req.user.id_usuario, versionSesion: req.user.version_sesion }));
 
 // ───────────────────────── Panel de administrador (sin cambios de contrato) ─────────────────────────
 router.post('/api/login-admin', loginLimiter, async (req, res) => {

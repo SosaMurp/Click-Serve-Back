@@ -250,3 +250,15 @@ test('aprobación de técnicos solo para administradores', async () => {
   const me = await api(server.url, 'GET', '/api/me', { token: t.token });
   assert.equal(me.body.usuario.aprobado, true);
 });
+
+test('técnicos cercanos: solo disponibles y con ubicación aproximada', async () => {
+  const c = await as(1);
+  const t = await as(2);
+  await api(server.url, 'PUT', '/api/tecnico/disponibilidad', { token: t.token, body: { disponible: true, latitud: 17.95678, longitud: -102.19876 } });
+  const res = await api(server.url, 'GET', '/api/tecnicos/cercanos?latitud=17.958&longitud=-102.2', { token: c.token });
+  assert.equal(res.status, 200);
+  const found = res.body.tecnicos.find((x) => x.id_usuario === t.id);
+  assert.ok(found);
+  assert.equal(found.latitud, 17.96);
+  assert.equal(found.telefono, undefined);
+});

@@ -3,7 +3,6 @@ const cors = require('cors');
 const compression = require('compression');
 const { maintenance } = require('./middleware/maintenance');
 const { errorHandler, notFound } = require('./lib/http');
-const registerLegacy = require('./routes/legacy');
 
 function securityHeaders(_req, res, next) {
   res.set('X-Content-Type-Options', 'nosniff');
@@ -34,9 +33,9 @@ function createApp() {
   app.use(require('./routes/incidencias'));
   app.use(require('./routes/pagos'));
   app.use(require('./routes/tecnico'));
-
-  // Rutas del index.js original que aún no se portan.
-  registerLegacy(app);
+  app.use(require('./routes/soporte'));
+  app.use(require('./routes/direcciones'));
+  app.use(require('./routes/biometria'));
 
   app.use('/api', notFound);
   app.use(errorHandler);

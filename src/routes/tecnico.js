@@ -72,6 +72,30 @@ router.put('/api/usuarios/ubicacion', auth, async (req, res) => {
   res.json({ mensaje: 'Ubicación actualizada.', ubicacion: { latitud: lat, longitud: lng } });
 });
 
+// Técnicos disponibles cerca (mapa del inicio). Coordenadas aproximadas (~1 km): sin datos de contacto.
+router.get('/api/tecnicos/cercanos', auth, async (req, res) => {
+  const lat = parseCoord(req.query.latitud, -90, 90) ?? 17.9583;
+  const lng = parseCoord(req.query.longitud, -180, 180) ?? -102.2;
+  const { rows } = await db().query(
+    `SELECT u.id_usuario, u.nombre, u.latitud, u.longitud,
+            (SELECT ROUND(AVG(q.puntuacion_tecnico)::numeric, 1) FROM calificaciones_servicio q WHERE q.id_tecnico = u.id_usuario AND q.puntuacion_tecnico IS NOT NULL) AS calificacion
+     FROM usuarios u
+     WHERE u.id_rol = 2 AND u.anonimizado = false AND u.identidad_verificada = true AND u.disponible = true
+       AND u.ultimo_latido > NOW() - INTERVAL '90 seconds' AND u.latitud IS NOT NULL
+     ORDER BY POWER(u.latitud - $1, 2) + POWER(u.longitud - $2, 2) LIMIT 20`,
+    [lat, lng]
+  );
+  res.json({
+    tecnicos: rows.map((r) => ({
+      id_usuario: r.id_usuario,
+      nombre: r.nombre,
+      calificacion: r.calificacion,
+      latitud: Math.round(Number(r.latitud) * 100) / 100,
+      longitud: Math.round(Number(r.longitud) * 100) / 100,
+    })),
+  });
+});
+
 // ───────────────────────── Resumen del panel (RF-111) ─────────────────────────
 router.get('/api/tecnico/resumen', ...techOnly, async (req, res) => {
   const me = req.user.id_usuario;
