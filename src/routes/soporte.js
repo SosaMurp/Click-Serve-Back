@@ -46,18 +46,16 @@ async function insertMessage(tx, { idTicket, idEmisor, esAsesor, mensaje, file, 
 }
 
 async function createTicket(tx, { user, asunto, categoria, prioridad = 'MEDIA', estado = 'ABIERTO', idSolicitud = null, mensaje, file }) {
+  // Si el folio aleatorio ya existe se genera otro; ON CONFLICT evita abortar la transacción.
   let ticket;
   for (let i = 0; i < 3 && !ticket; i += 1) {
-    try {
-      ticket = (await tx.query(
-        `INSERT INTO soporte_tickets (folio, id_usuario, id_solicitud, asunto, categoria, prioridad, estado)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [S.folio('TCK'), user.id_usuario, idSolicitud, asunto, categoria, prioridad, estado]
-      )).rows[0];
-    } catch (error) {
-      if (error.code !== '23505') throw error;
-    }
+    ticket = (await tx.query(
+      `INSERT INTO soporte_tickets (folio, id_usuario, id_solicitud, asunto, categoria, prioridad, estado)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (folio) DO NOTHING RETURNING *`,
+      [S.folio('TCK'), user.id_usuario, idSolicitud, asunto, categoria, prioridad, estado]
+    )).rows[0];
   }
+  if (!ticket) throw new Error('No se pudo generar un folio único para el ticket');
   await insertMessage(tx, { idTicket: ticket.id_ticket, idEmisor: user.id_usuario, esAsesor: false, mensaje, file, owner: user.id_usuario });
   await insertMessage(tx, { idTicket: ticket.id_ticket, idEmisor: null, esAsesor: true, mensaje: autoReply(ticket) });
   return ticket;

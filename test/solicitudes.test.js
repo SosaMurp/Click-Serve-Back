@@ -93,6 +93,22 @@ test('una cotización de la versión anterior (sin desglose) regresa a EN_SITIO 
   assert.equal(row.rows[0].estado, 'EN_SITIO');
 });
 
+test('si el folio generado ya existe, se genera otro en vez de fallar', async () => {
+  const S = require('../src/services/solicitudes');
+  const c = await cliente();
+  const original = S.folio;
+  const primera = (await crearSolicitud(c.token)).body.solicitud;
+  let llamadas = 0;
+  S.folio = (prefix) => (prefix === 'SRV' && (llamadas += 1) === 1 ? primera.folio : original(prefix));
+  try {
+    const res = await crearSolicitud(c.token);
+    assert.equal(res.status, 201);
+    assert.notEqual(res.body.solicitud.folio, primera.folio);
+  } finally {
+    S.folio = original;
+  }
+});
+
 test('un cliente pendiente de aprobación no puede crear solicitudes', async () => {
   const c = await cliente({ aprobado: false });
   const res = await crearSolicitud(c.token);

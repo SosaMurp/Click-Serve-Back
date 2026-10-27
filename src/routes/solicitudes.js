@@ -64,20 +64,19 @@ router.post(
     const lng = parseCoord(b.longitud, -180, 180);
 
     const created = await withTransaction(async (tx) => {
+      // Si el folio aleatorio ya existe se genera otro; ON CONFLICT evita abortar la transacción.
       let row;
       for (let attempt = 0; attempt < 3 && !row; attempt += 1) {
-        try {
-          const r = await tx.query(
-            `INSERT INTO solicitudes_servicio (folio, id_usuario, categoria, descripcion, direccion, referencias,
-                                               fecha_preferida, hora_preferida, estado, latitud, longitud, estado_pago)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDIENTE', $9, $10, 'PENDIENTE') RETURNING id_solicitud`,
-            [S.folio('SRV'), req.user.id_usuario, categoria, descripcion, direccion, sanitizeText(b.referencias, 300) || null, fecha, hora, lat, lng]
-          );
-          row = r.rows[0];
-        } catch (error) {
-          if (error.code !== '23505') throw error;
-        }
+        const r = await tx.query(
+          `INSERT INTO solicitudes_servicio (folio, id_usuario, categoria, descripcion, direccion, referencias,
+                                             fecha_preferida, hora_preferida, estado, latitud, longitud, estado_pago)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PENDIENTE', $9, $10, 'PENDIENTE')
+           ON CONFLICT (folio) DO NOTHING RETURNING id_solicitud`,
+          [S.folio('SRV'), req.user.id_usuario, categoria, descripcion, direccion, sanitizeText(b.referencias, 300) || null, fecha, hora, lat, lng]
+        );
+        row = r.rows[0];
       }
+      if (!row) throw new Error('No se pudo generar un folio único para la solicitud');
       for (const image of req.files || []) {
         await tx.query(
           'INSERT INTO solicitud_imagenes (id_solicitud, nombre, tipo_mime, contenido) VALUES ($1, $2, $3, $4)',
