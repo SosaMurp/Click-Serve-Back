@@ -15,9 +15,14 @@ async function fetchWithTimeout(url, options, ms = 5000) {
 
 // RNF-02: el backend solo recibe el token de la tarjeta. Con CONEKTA_PRIVATE_KEY cobra en Conekta;
 // sin ella (desarrollo) registra un cargo de sandbox y respeta los tokens de rechazo de prueba.
+// En producción sin llave se niega el cobro: nunca se marca pagado un servicio que nadie cobró.
 async function chargeCard({ token, amount, description, customer }) {
   const key = process.env.CONEKTA_PRIVATE_KEY;
   if (!key) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('CONEKTA_PRIVATE_KEY no está configurada en producción: se rechazan los cobros.');
+      return { ok: false, modo: 'CONEKTA', unavailable: true, motivo: 'Los pagos no están disponibles en este momento. Intenta más tarde.' };
+    }
     if (DECLINED_TEST_TOKENS.has(token)) {
       return { ok: false, modo: 'SANDBOX', motivo: 'La tarjeta fue rechazada por el banco emisor.' };
     }

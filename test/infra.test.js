@@ -68,3 +68,23 @@ test('archivos: firma alterada o vencida responde 403', async () => {
 test('sanitizeText elimina etiquetas HTML y recorta', () => {
   assert.equal(sanitizeText('  <script>alert(1)</script>Hola <b>mundo</b> '), 'alert(1)Hola mundo');
 });
+
+test('pagos: sin CONEKTA_PRIVATE_KEY en producción no se aprueba ningún cargo (falla cerrado)', async () => {
+  const { chargeCard } = require('../src/services/payments');
+  const prev = { key: process.env.CONEKTA_PRIVATE_KEY, env: process.env.NODE_ENV, jwt: process.env.JWT_SECRET };
+  delete process.env.CONEKTA_PRIVATE_KEY;
+  process.env.NODE_ENV = 'production';
+  process.env.JWT_SECRET = prev.jwt || 'secreto-de-prueba';
+  try {
+    const r = await chargeCard({ token: 'tok_test_visa_4242', amount: '100.00', description: 'Servicio', customer: { nombre: 'A', correo: 'a@b.c' } });
+    assert.equal(r.ok, false);
+    assert.equal(r.unavailable, true);
+  } finally {
+    if (prev.key !== undefined) process.env.CONEKTA_PRIVATE_KEY = prev.key;
+    if (prev.env === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prev.env;
+    if (prev.jwt === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = prev.jwt;
+  }
+  const dev = await chargeCard({ token: 'tok_test_visa_4242', amount: '100.00', description: 'Servicio', customer: { nombre: 'A', correo: 'a@b.c' } });
+  assert.equal(dev.ok, true);
+  assert.equal(dev.modo, 'SANDBOX');
+});
