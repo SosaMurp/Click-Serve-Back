@@ -45,7 +45,7 @@ async function chargeCard({ token, amount, description, customer }) {
         line_items: [{ name: description, unit_price: Math.round(Number(amount) * 100), quantity: 1 }],
         charges: [{ payment_method: { type: 'card', token_id: token } }],
       }),
-    }, 15000);
+    });
     // Un 5xx de Conekta no dice si la orden se creó: se trata como cobro incierto, no como rechazo.
     if (res.status >= 500) {
       return { ok: false, modo: 'CONEKTA', unavailable: true, uncertain: true, motivo: 'La pasarela de pago no confirmó el cobro.' };
