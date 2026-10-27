@@ -85,6 +85,22 @@ test('archivos: firma alterada o vencida responde 403', async () => {
   assert.equal((await fetch(server.url + alterada)).status, 403);
 });
 
+test('TRUST_PROXY: detrás de un proxy configurado se usa la IP real del cliente', async () => {
+  const { createApp } = require('../src/app');
+  const prev = process.env.TRUST_PROXY;
+  process.env.TRUST_PROXY = '1';
+  try {
+    const app = createApp();
+    assert.equal(app.get('trust proxy fn')('10.0.0.8', 0), true);
+    assert.equal(app.get('trust proxy fn')('10.0.0.8', 1), false);
+  } finally {
+    if (prev === undefined) delete process.env.TRUST_PROXY; else process.env.TRUST_PROXY = prev;
+  }
+  const local = createApp();
+  assert.equal(local.get('trust proxy fn')('127.0.0.1', 0), true);
+  assert.equal(local.get('trust proxy fn')('10.0.0.8', 0), false);
+});
+
 test('sanitizeText elimina etiquetas HTML y recorta', () => {
   assert.equal(sanitizeText('  <script>alert(1)</script>Hola <b>mundo</b> '), 'alert(1)Hola mundo');
 });

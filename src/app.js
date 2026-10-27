@@ -15,7 +15,10 @@ function securityHeaders(_req, res, next) {
 function createApp() {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 'loopback');
+  // req.ip alimenta los límites de intentos. Detrás de un balanceador, TRUST_PROXY indica cuántos saltos
+  // (p. ej. 1) o qué subredes son de confianza; sin él solo se confía en un proxy local.
+  const trust = process.env.TRUST_PROXY;
+  app.set('trust proxy', !trust ? 'loopback' : /^\d+$/.test(trust) ? Number(trust) : trust);
   app.use(compression());
   app.use(cors({ exposedHeaders: ['Idempotent-Replay', 'Retry-After'] }));
   app.use(express.json({ limit: '25mb' }));
