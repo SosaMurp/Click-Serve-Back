@@ -128,6 +128,12 @@ test('disponibilidad: el técnico aprobado se conecta; sin latido reciente deja 
   });
   const rec = await api(server.url, 'GET', `/api/tecnicos/recomendados?id_solicitud=${s.body.solicitud.id_solicitud}`, { token: c.token });
   assert.equal(rec.body.tecnicos.some((x) => x.id_usuario === t.id), true);
+  // Para el mapa del cliente solo viaja la posición redondeada (~1 km), nunca la exacta.
+  const ficha = rec.body.tecnicos.find((x) => x.id_usuario === t.id);
+  assert.equal(ficha.latitud_aprox, 17.96);
+  assert.equal(ficha.longitud_aprox, -102.2);
+  assert.equal(ficha.latitud, undefined);
+  assert.equal(ficha.longitud, undefined);
   await getPool().query("UPDATE usuarios SET ultimo_latido = NOW() - INTERVAL '5 minutes' WHERE id_usuario = $1", [t.id]);
   const rec2 = await api(server.url, 'GET', `/api/tecnicos/recomendados?id_solicitud=${s.body.solicitud.id_solicitud}`, { token: c.token });
   assert.equal(rec2.body.tecnicos.some((x) => x.id_usuario === t.id), false);

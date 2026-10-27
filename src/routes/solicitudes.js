@@ -188,6 +188,8 @@ router.get('/api/tecnicos/recomendados', auth, async (req, res) => {
   const { rows } = await db().query(
     `SELECT u.id_usuario, u.nombre, u.apellido, u.foto_archivo, COALESCE(u.verificado_sep, false) AS verificado_sep, u.bio,
             ROUND(${haversineSql('u.latitud', 'u.longitud', '$1::numeric', '$2::numeric')}::numeric, 1) AS distancia_km,
+            -- Posición aproximada (~1 km) para el mapa: la exacta solo se comparte con el técnico asignado en camino.
+            ROUND(u.latitud::numeric, 2)::float AS latitud_aprox, ROUND(u.longitud::numeric, 2)::float AS longitud_aprox,
             (SELECT ROUND(AVG(q.puntuacion_tecnico)::numeric, 1) FROM calificaciones_servicio q WHERE q.id_tecnico = u.id_usuario AND q.puntuacion_tecnico IS NOT NULL) AS calificacion,
             (SELECT COUNT(*)::int FROM calificaciones_servicio q WHERE q.id_tecnico = u.id_usuario AND q.puntuacion_tecnico IS NOT NULL) AS resenas,
             (SELECT COUNT(*)::int FROM solicitudes_servicio f WHERE f.id_tecnico = u.id_usuario AND f.estado = 'FINALIZADA') AS trabajos,
