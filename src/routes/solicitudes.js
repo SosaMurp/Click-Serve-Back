@@ -403,7 +403,7 @@ router.post('/api/cotizaciones', auth, requireRole(ROL.TECNICO), requireApproved
 router.patch('/api/solicitudes/:id/responder-cotizacion', auth, requireRole(ROL.CLIENTE), async (req, res) => {
   const decision = String(req.body?.respuesta || '').toUpperCase();
   if (!['ACEPTAR', 'RECHAZAR'].includes(decision)) return fail(res, 400, 'VALIDATION_ERROR', 'Respuesta inválida. Debe ser ACEPTAR o RECHAZAR.');
-  const row = await withTransaction(async (tx) => {
+  const { row, outdated } = await withTransaction(async (tx) => {
     const current = await S.findRow(req.params.id, tx, { lock: true });
     if (!current || current.id_usuario !== req.user.id_usuario) throw new HttpError(404, 'NOT_FOUND', 'Solicitud no encontrada.');
     if (current.estado !== 'ESPERANDO_APROBACION') throw new HttpError(409, 'INVALID_STATE', 'La cotización ya no está pendiente de respuesta.');
@@ -411,13 +411,18 @@ router.patch('/api/solicitudes/:id/responder-cotizacion', auth, requireRole(ROL.
       "UPDATE cotizaciones_servicio SET estado = $1, fecha_respuesta = NOW() WHERE id_solicitud = $2 AND estado = 'ENVIADA' RETURNING monto_total",
       [decision === 'ACEPTAR' ? 'ACEPTADA' : 'RECHAZADA', current.id_solicitud]
     )).rows[0];
-    if (decision === 'ACEPTAR') {
+    // Las cotizaciones de la versión anterior no tienen desglose: no hay total que aprobar y el técnico la reenvía.
+    if (decision === 'ACEPTAR' && cot) {
       await tx.query("UPDATE solicitudes_servicio SET estado = 'EN_PROCESO', monto_total = $1 WHERE id_solicitud = $2", [cot.monto_total, current.id_solicitud]);
     } else {
       await tx.query("UPDATE solicitudes_servicio SET estado = 'EN_SITIO' WHERE id_solicitud = $1", [current.id_solicitud]);
     }
-    return S.findRow(current.id_solicitud, tx);
+    return { row: await S.findRow(current.id_solicitud, tx), outdated: decision === 'ACEPTAR' && !cot };
   });
+  if (outdated) {
+    S.notify(row, 'La cotización era de la versión anterior de la app. Envíala de nuevo con su desglose.', { push: [[row.id_tecnico, 'Reenvía la cotización']] });
+    return fail(res, 409, 'QUOTE_OUTDATED', 'Esta cotización ya no es válida. Le pedimos al técnico que te envíe una nueva.', { solicitud: S.shape(row, req.user) });
+  }
   S.notify(row, decision === 'ACEPTAR' ? 'El cliente aprobó la cotización. Puedes iniciar el trabajo.' : 'El cliente rechazó la cotización. Puedes enviar una nueva.', { push: [[row.id_tecnico, decision === 'ACEPTAR' ? 'Cotización aprobada' : 'Cotización rechazada']] });
   res.json({ mensaje: `Cotización ${decision === 'ACEPTAR' ? 'aceptada' : 'rechazada'}.`, solicitud: S.shape(row, req.user) });
 });

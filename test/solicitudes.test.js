@@ -79,6 +79,20 @@ async function subirEvidencia(token, id) {
   return api(server.url, 'POST', `/api/solicitudes/${id}/evidencias`, { token, form });
 }
 
+test('una cotización de la versión anterior (sin desglose) regresa a EN_SITIO para reenviarse', async () => {
+  const c = await cliente();
+  const t = await tecnico();
+  const s = (await crearSolicitud(c.token)).body.solicitud;
+  await api(server.url, 'POST', `/api/solicitudes/${s.id_solicitud}/aceptar`, { token: t.token });
+  // Así dejaba la orden la ruta anterior: solo el estado y el monto, sin fila en cotizaciones_servicio.
+  await getPool().query("UPDATE solicitudes_servicio SET estado = 'ESPERANDO_APROBACION', monto_cotizacion = 500 WHERE id_solicitud = $1", [s.id_solicitud]);
+  const res = await api(server.url, 'PATCH', `/api/solicitudes/${s.id_solicitud}/responder-cotizacion`, { token: c.token, body: { respuesta: 'ACEPTAR' } });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, 'QUOTE_OUTDATED');
+  const row = await getPool().query('SELECT estado FROM solicitudes_servicio WHERE id_solicitud = $1', [s.id_solicitud]);
+  assert.equal(row.rows[0].estado, 'EN_SITIO');
+});
+
 test('un cliente pendiente de aprobación no puede crear solicitudes', async () => {
   const c = await cliente({ aprobado: false });
   const res = await crearSolicitud(c.token);
