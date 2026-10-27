@@ -1,10 +1,11 @@
 const jwt = require('jsonwebtoken');
+const { isDevelopment } = require('./env');
 
 let warned = false;
 
 function jwtSecret() {
   if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
-  if (process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET es obligatorio en producción');
+  if (!isDevelopment()) throw new Error('JWT_SECRET es obligatorio fuera de desarrollo (NODE_ENV=development)');
   if (!warned) {
     warned = true;
     console.warn('AVISO: JWT_SECRET no está configurado; se usa una llave de desarrollo. Configúrala antes de publicar.');

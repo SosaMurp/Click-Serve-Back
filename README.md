@@ -10,6 +10,10 @@ cp .env.example .env      # y llena los valores
 npm start                 # aplica migraciones y escucha en PORT
 ```
 
+`NODE_ENV=development` (en `.env`) habilita los atajos de desarrollo: cobros en modo sandbox, códigos de verificación
+en consola y llaves de respaldo. Sin `NODE_ENV`, o con cualquier otro valor, el servidor se comporta como producción:
+exige `JWT_SECRET`, `FILES_SECRET`, `CONEKTA_PRIVATE_KEY` y SMTP, y falla cerrado si faltan.
+
 Las migraciones (`migrations/` y los `.sql` de la raíz) se aplican solas al arrancar y quedan registradas en `schema_migraciones`.
 
 ## Pruebas

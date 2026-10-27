@@ -108,3 +108,25 @@ test('pagos: sin CONEKTA_PRIVATE_KEY en producción no se aprueba ningún cargo 
   assert.equal(dev.ok, true);
   assert.equal(dev.modo, 'SANDBOX');
 });
+
+test('sin NODE_ENV el servidor se comporta como producción: sin cobros sandbox, secretos de respaldo ni códigos en consola', async () => {
+  const { chargeCard } = require('../src/services/payments');
+  const { sendMail, outbox } = require('../src/lib/mailer');
+  const prev = { env: process.env.NODE_ENV, files: process.env.FILES_SECRET, jwt: process.env.JWT_SECRET };
+  delete process.env.NODE_ENV;
+  delete process.env.FILES_SECRET;
+  delete process.env.JWT_SECRET;
+  const enviados = outbox.length;
+  try {
+    const r = await chargeCard({ token: 'tok_test_visa_4242', amount: '100.00', description: 'Servicio', customer: { nombre: 'A', correo: 'a@b.c' } });
+    assert.equal(r.ok, false);
+    assert.equal(r.unavailable, true);
+    assert.throws(() => signFileUrl(1), /obligatorio/);
+    await assert.rejects(sendMail({ to: 'a@b.c', subject: 'Código', html: '', code: '123456' }), (e) => e.code === 'MAIL_UNAVAILABLE');
+    assert.equal(outbox.length, enviados);
+  } finally {
+    process.env.NODE_ENV = prev.env;
+    process.env.FILES_SECRET = prev.files;
+    process.env.JWT_SECRET = prev.jwt;
+  }
+});

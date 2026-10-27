@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const multer = require('multer');
 const { HttpError } = require('./http');
+const { isDevelopment } = require('./env');
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
 const DOCUMENT_TYPES = [...IMAGE_TYPES, 'application/pdf'];
@@ -8,7 +9,7 @@ const DOCUMENT_TYPES = [...IMAGE_TYPES, 'application/pdf'];
 function filesSecret() {
   const secret = process.env.FILES_SECRET || process.env.JWT_SECRET;
   if (secret) return secret;
-  if (process.env.NODE_ENV === 'production') throw new Error('FILES_SECRET o JWT_SECRET es obligatorio en producción');
+  if (!isDevelopment()) throw new Error('FILES_SECRET o JWT_SECRET es obligatorio fuera de desarrollo (NODE_ENV=development)');
   return 'dev-files-secret';
 }
 

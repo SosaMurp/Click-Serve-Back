@@ -1,6 +1,8 @@
 const nodemailer = require('nodemailer');
+const { HttpError } = require('./http');
+const { isDevelopment } = require('./env');
 
-// Mensajes enviados durante las pruebas o sin proveedor configurado (para inspección).
+// Mensajes simulados en desarrollo y pruebas (para inspección); se conservan los últimos 200.
 const outbox = [];
 let transporter = null;
 
@@ -36,18 +38,23 @@ function codeEmailHtml({ titulo, saludo, texto, code }) {
   </div>`;
 }
 
+// Solo en desarrollo o pruebas se simula el envío (consola y outbox acotado). Fuera de desarrollo, sin
+// proveedor configurado se responde 503: los códigos de un solo uso nunca terminan en los logs.
+function simulate(record, line, code) {
+  if (!isDevelopment()) {
+    console.error(`${record.canal} sin proveedor configurado: no se envió "${record.subject}".`);
+    throw new HttpError(503, code, 'No pudimos enviarte el código en este momento. Intenta más tarde.');
+  }
+  outbox.push(record);
+  if (outbox.length > 200) outbox.shift();
+  if (process.env.NODE_ENV !== 'test') console.log(line);
+  return { simulated: true };
+}
+
 async function sendMail({ to, subject, html, code }) {
   const record = { canal: 'EMAIL', to, subject, code, fecha: new Date() };
-  if (process.env.NODE_ENV === 'test') {
-    outbox.push(record);
-    return { simulated: true };
-  }
-  const t = getTransporter();
-  if (!t) {
-    outbox.push(record);
-    console.log(`[correo simulado] Para ${to}: ${subject}${code ? ` — código ${code}` : ''}`);
-    return { simulated: true };
-  }
+  const t = process.env.NODE_ENV === 'test' ? null : getTransporter();
+  if (!t) return simulate(record, `[correo simulado] Para ${to}: ${subject}${code ? ` — código ${code}` : ''}`, 'MAIL_UNAVAILABLE');
   await t.sendMail({ from: process.env.SMTP_FROM || `"Click & Serve" <${process.env.SMTP_USER}>`, to, subject, html });
   return { simulated: false };
 }
@@ -55,15 +62,9 @@ async function sendMail({ to, subject, html, code }) {
 // RF-10: canal SMS con Twilio cuando hay credenciales; sin ellas se simula en consola.
 async function sendSms({ to, body, code }) {
   const record = { canal: 'SMS', to, subject: body, code, fecha: new Date() };
-  if (process.env.NODE_ENV === 'test') {
-    outbox.push(record);
-    return { simulated: true };
-  }
   const { TWILIO_ACCOUNT_SID: sid, TWILIO_AUTH_TOKEN: tokenTw, TWILIO_FROM: from } = process.env;
-  if (!sid || !tokenTw || !from) {
-    outbox.push(record);
-    console.log(`[SMS simulado] Para ${to}: ${body}`);
-    return { simulated: true };
+  if (process.env.NODE_ENV === 'test' || !sid || !tokenTw || !from) {
+    return simulate(record, `[SMS simulado] Para ${to}: ${body}`, 'SMS_UNAVAILABLE');
   }
   const twilio = require('twilio')(sid, tokenTw);
   const phone = String(to).startsWith('+') ? to : `+52${String(to).replace(/\D/g, '')}`;
