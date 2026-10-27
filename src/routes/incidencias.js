@@ -68,7 +68,7 @@ router.get('/api/incidencias', auth, async (req, res) => {
   res.json({ incidencias: rows });
 });
 
-// RF-55: reasignar · RF-57: cancelar sin cargo · continuar: el cliente retira la queja.
+// RF-55: reasignar · RF-57: cancelar sin cargo (solo el cliente) · continuar: quien reportó retira su reporte.
 router.post('/api/incidencias/:id/resolver', auth, async (req, res) => {
   const accion = String(req.body?.accion || '').toUpperCase();
   if (!['REASIGNAR', 'CANCELAR', 'CONTINUAR'].includes(accion)) return fail(res, 400, 'VALIDATION_ERROR', 'Acción no válida.');
@@ -77,7 +77,17 @@ router.post('/api/incidencias/:id/resolver', auth, async (req, res) => {
     const inc = (await tx.query('SELECT * FROM incidencias WHERE id_incidencia = $1 FOR UPDATE', [req.params.id])).rows[0];
     if (!inc) throw new HttpError(404, 'NOT_FOUND', 'Reporte no encontrado.');
     const row = await S.findRow(inc.id_solicitud, tx, { lock: true });
-    if (!row || row.id_usuario !== req.user.id_usuario) throw new HttpError(404, 'NOT_FOUND', 'Reporte no encontrado.');
+    const isClient = row?.id_usuario === req.user.id_usuario;
+    const isReporter = inc.id_usuario === req.user.id_usuario;
+    if (!row || (!isClient && !isReporter)) throw new HttpError(404, 'NOT_FOUND', 'Reporte no encontrado.');
+    // Nadie cierra ni retira el reporte de la otra parte: una alerta SOS del técnico solo la atiende seguridad.
+    if (!isReporter && (inc.tipo === 'SEGURIDAD' || accion === 'CONTINUAR')) {
+      throw new HttpError(403, 'NOT_REPORTER', 'Solo quien hizo el reporte puede retirarlo; las alertas de seguridad las atiende el equipo de Click & Serve.');
+    }
+    if (!isClient && accion !== 'CONTINUAR') throw new HttpError(403, 'ROLE_FORBIDDEN', 'Solo el cliente puede reasignar o cancelar la orden.');
+    if (row.estado_pago === 'PROCESANDO' && accion !== 'CONTINUAR') {
+      throw new HttpError(409, 'PAYMENT_IN_PROGRESS', 'Hay un cobro en revisión para este servicio; soporte resolverá el reporte.');
+    }
     if (inc.estado !== 'ABIERTA') throw new HttpError(409, 'INVALID_STATE', 'Este reporte ya fue resuelto.');
     if (row.estado !== 'SUSPENDIDA' && accion !== 'CONTINUAR') throw new HttpError(409, 'INVALID_STATE', 'La orden no está suspendida.');
 
@@ -111,7 +121,7 @@ router.post('/api/incidencias/:id/resolver', auth, async (req, res) => {
   const avisos = {
     REASIGNAR: 'El cliente pidió otro técnico para esta orden.',
     CANCELAR: 'El cliente canceló la orden por la incidencia reportada.',
-    CONTINUAR: 'El cliente retiró el reporte; la orden continúa.',
+    CONTINUAR: 'Se retiró el reporte; la orden continúa.',
   };
   if (out.previousTech) realtime.emitToUser(out.previousTech, 'solicitud.actualizada', { id_solicitud: Number(out.row.id_solicitud), estado: out.row.estado, aviso: avisos[accion] });
   realtime.emitToUser(out.row.id_usuario, 'solicitud.actualizada', { id_solicitud: Number(out.row.id_solicitud), estado: out.row.estado });

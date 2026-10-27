@@ -223,9 +223,9 @@ async function detail(row, viewer, db = getPool()) {
       [id]
     ) : { rows: [] },
     isParticipant ? db.query(
-      `SELECT id_incidencia, folio, tipo, descripcion, prioridad, estado, fecha_creacion
+      `SELECT id_incidencia, folio, tipo, descripcion, prioridad, estado, fecha_creacion, (id_usuario = $2) AS propia
        FROM incidencias WHERE id_solicitud = $1 AND estado = 'ABIERTA' ORDER BY id_incidencia DESC LIMIT 1`,
-      [id]
+      [id, viewer.id_usuario]
     ) : { rows: [] },
     isParticipant ? db.query('SELECT monto, modo, referencia, estado, fecha, desglose FROM pagos WHERE id_solicitud = $1', [id]) : { rows: [] },
   ]);

@@ -320,6 +320,28 @@ test('incidencia "no se presentó" suspende la orden; reasignar y cancelar sin c
   assert.equal(cancelar.body.solicitud.estado_pago, 'NO_APLICA');
 });
 
+test('el cliente no puede cerrar el SOS ni retirar el reporte que hizo el técnico', async () => {
+  const c = await cliente();
+  const t = await tecnico();
+  const s = (await crearSolicitud(c.token)).body.solicitud;
+  await api(server.url, 'POST', `/api/solicitudes/${s.id_solicitud}/aceptar`, { token: t.token });
+  const sos = await api(server.url, 'POST', `/api/solicitudes/${s.id_solicitud}/sos`, { token: t.token, headers: idem(), body: { latitud: 17.95, longitud: -102.2 } });
+  assert.equal(sos.status, 200);
+  const cerrarSos = await api(server.url, 'POST', `/api/incidencias/${sos.body.incidencia.id_incidencia}/resolver`, { token: c.token, body: { accion: 'CONTINUAR' } });
+  assert.equal(cerrarSos.status, 403);
+  const abierta = await getPool().query('SELECT estado FROM incidencias WHERE id_incidencia = $1', [sos.body.incidencia.id_incidencia]);
+  assert.equal(abierta.rows[0].estado, 'ABIERTA');
+
+  const rep = await api(server.url, 'POST', `/api/solicitudes/${s.id_solicitud}/incidencias`, {
+    token: t.token, body: { tipo: 'OTRO', descripcion: 'El domicilio no coincide con la dirección indicada.' },
+  });
+  const retirar = await api(server.url, 'POST', `/api/incidencias/${rep.body.incidencia.id_incidencia}/resolver`, { token: c.token, body: { accion: 'CONTINUAR' } });
+  assert.equal(retirar.status, 403);
+  const propio = await api(server.url, 'POST', `/api/incidencias/${rep.body.incidencia.id_incidencia}/resolver`, { token: t.token, body: { accion: 'CONTINUAR' } });
+  assert.equal(propio.status, 200);
+  assert.equal(propio.body.solicitud.estado, 'ASIGNADA');
+});
+
 test('reprogramación: el técnico propone, el cliente contrapropone y el técnico acepta', async () => {
   const c = await cliente();
   const t = await tecnico();
