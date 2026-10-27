@@ -47,6 +47,26 @@ test('idempotencia: la misma clave repite la respuesta sin ejecutar dos veces', 
   } finally { await app.close(); }
 });
 
+test('idempotencia: un rechazo 4xx no se guarda; el reintento con la misma clave vuelve a ejecutarse', async () => {
+  const user = await createUser();
+  let intentos = 0;
+  // Simula un pago: el primer intento lo rechaza el banco (402), el segundo con otra tarjeta pasa.
+  const app = await miniApp((_req, res) => {
+    intentos += 1;
+    if (intentos === 1) return res.status(402).json({ code: 'PAYMENT_DECLINED' });
+    return res.status(200).json({ pagado: true });
+  });
+  try {
+    const headers = { 'X-User': String(user.id), 'Idempotency-Key': randomUUID() };
+    const rechazo = await api(app.url, 'POST', '/accion', { body: {}, headers });
+    const reintento = await api(app.url, 'POST', '/accion', { body: {}, headers });
+    assert.equal(rechazo.status, 402);
+    assert.equal(reintento.status, 200);
+    assert.equal(reintento.body.pagado, true);
+    assert.equal(intentos, 2);
+  } finally { await app.close(); }
+});
+
 test('archivos: URL firmada vigente entrega el contenido', async () => {
   const user = await createUser();
   const id = await saveFile(getPool(), { owner: user.id, buffer: Buffer.from('hola'), mime: 'text/plain', name: 'a.txt', categoria: 'CHAT' });

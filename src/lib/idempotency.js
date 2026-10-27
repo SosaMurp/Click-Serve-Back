@@ -43,10 +43,12 @@ function idempotent(scope) {
     }
 
     // Guarda la respuesta antes de enviarla para que un reintento inmediato la encuentre.
+    // Solo se guardan los éxitos: un error (p. ej. tarjeta rechazada, 402) libera la clave para que
+    // el reintento con otra tarjeta o con datos corregidos sí se ejecute.
     const sendJson = res.json.bind(res);
     res.json = (body) => {
       const status = res.statusCode;
-      const store = status >= 500
+      const store = status >= 400
         ? pool.query('DELETE FROM idempotencia WHERE clave = $1 AND id_usuario = $2', [key, userId])
         : pool.query('UPDATE idempotencia SET status = $1, cuerpo = $2 WHERE clave = $3 AND id_usuario = $4',
           [status, JSON.stringify(body ?? null), key, userId]);
