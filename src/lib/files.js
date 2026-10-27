@@ -31,6 +31,16 @@ function verifyFileSignature(idArchivo, exp, sig) {
   return expected.length === given.length && crypto.timingSafeEqual(expected, given);
 }
 
+// Fotos de una solicitud (tabla solicitud_imagenes) con la misma firma de vigencia corta.
+function signRequestImageUrl(idImagen, ttlSeconds = 600) {
+  const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  return `/api/solicitudes/imagenes/${idImagen}?exp=${exp}&sig=${hmac(`img.${idImagen}.${exp}`)}`;
+}
+
+function verifyRequestImageSignature(idImagen, exp, sig) {
+  return verifyFileSignature(`img.${idImagen}`, exp, sig);
+}
+
 async function saveFile(db, { owner, buffer, mime, name, categoria }) {
   const { rows } = await db.query(
     `INSERT INTO archivos (id_propietario, categoria, nombre, tipo_mime, tamano, contenido)
@@ -52,4 +62,4 @@ function uploader({ types = IMAGE_TYPES, maxFiles = 5, maxSizeMb = 5 } = {}) {
   });
 }
 
-module.exports = { signFileUrl, verifyFileSignature, saveFile, uploader, IMAGE_TYPES, DOCUMENT_TYPES };
+module.exports = { signFileUrl, verifyFileSignature, signRequestImageUrl, verifyRequestImageSignature, saveFile, uploader, IMAGE_TYPES, DOCUMENT_TYPES };

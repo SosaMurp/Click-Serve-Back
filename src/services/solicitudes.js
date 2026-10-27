@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const { getPool } = require('../db/pool');
-const { signFileUrl } = require('../lib/files');
+const { signFileUrl, signRequestImageUrl } = require('../lib/files');
 const { haversineKm, etaMinutes } = require('../lib/geo');
 const realtime = require('../lib/realtime');
 const { sendPush } = require('../lib/push');
@@ -233,7 +233,7 @@ async function detail(row, viewer, db = getPool()) {
   const cot = cotizacion.rows[0] || null;
   const isTech = row.id_tecnico === viewer.id_usuario;
   return shape(row, viewer, {
-    imagenes: imagenes.rows.map((r) => ({ id: r.id_imagen, url: `/api/solicitudes/${id}/imagenes/${r.id_imagen}` })),
+    imagenes: imagenes.rows.map((r) => ({ id: r.id_imagen, url: signRequestImageUrl(r.id_imagen) })),
     cotizacion: cot && {
       ...cot,
       conceptos: conceptos.rows.filter((k) => k.id_cotizacion === cot.id_cotizacion),

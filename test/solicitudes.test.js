@@ -359,3 +359,19 @@ test('NUEVAS incluye la distancia y los contadores del panel', async () => {
   assert.ok(res.body.solicitudes[0].distancia_km !== undefined);
   assert.equal(typeof res.body.contadores.nuevas, 'number');
 });
+
+test('las fotos de la solicitud se sirven con URL firmada (sin cabecera de sesión)', async () => {
+  const c = await cliente();
+  const form = new FormData();
+  form.append('categoria', 'PLOMERIA');
+  form.append('descripcion', 'Gotea la llave del fregadero de la cocina.');
+  form.append('direccion', 'Calle 9 #12, Centro');
+  form.append('imagenes', new Blob([PNG], { type: 'image/png' }), 'fuga.png');
+  const s = await api(server.url, 'POST', '/api/solicitudes', { token: c.token, headers: idem(), form });
+  assert.equal(s.status, 201);
+  const det = await api(server.url, 'GET', `/api/solicitudes/${s.body.solicitud.id_solicitud}`, { token: c.token });
+  assert.match(det.body.solicitud.imagenes[0].url, /\?exp=\d+&sig=/);
+  const res = await fetch(server.url + det.body.solicitud.imagenes[0].url);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'image/png');
+});

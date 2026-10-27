@@ -6,7 +6,7 @@ const { fail, HttpError } = require('../lib/http');
 const { audit } = require('../lib/audit');
 const { idempotent } = require('../lib/idempotency');
 const { sanitizeText } = require('../lib/sanitize');
-const { saveFile, uploader, signFileUrl, DOCUMENT_TYPES } = require('../lib/files');
+const { saveFile, uploader, signFileUrl, verifyRequestImageSignature, DOCUMENT_TYPES } = require('../lib/files');
 const { parseCoord, haversineSql } = require('../lib/geo');
 const realtime = require('../lib/realtime');
 const { sendPush } = require('../lib/push');
@@ -154,6 +154,18 @@ router.get('/api/solicitudes/tecnico', auth, requireRole(ROL.TECNICO), async (re
 router.get('/api/solicitudes/:id', auth, async (req, res) => {
   const row = await loadOr404(req.params.id, req.user);
   res.json({ solicitud: await S.detail(row, req.user) });
+});
+
+// Foto de la solicitud con URL firmada (para <Image>, que no puede mandar la cabecera de sesión).
+router.get('/api/solicitudes/imagenes/:idImagen', async (req, res) => {
+  const id = Number(req.params.idImagen);
+  if (!Number.isInteger(id) || !verifyRequestImageSignature(id, req.query.exp, req.query.sig)) {
+    return fail(res, 403, 'FILE_LINK_EXPIRED', 'El enlace de la imagen venció. Vuelve a abrirla desde la app.');
+  }
+  const { rows } = await db().query('SELECT tipo_mime, contenido FROM solicitud_imagenes WHERE id_imagen = $1', [id]);
+  if (!rows[0]) return fail(res, 404, 'NOT_FOUND', 'Imagen no encontrada.');
+  res.set('Cache-Control', 'private, max-age=300');
+  return res.type(rows[0].tipo_mime).send(rows[0].contenido);
 });
 
 router.get('/api/solicitudes/:id/imagenes/:idImagen', auth, async (req, res) => {
