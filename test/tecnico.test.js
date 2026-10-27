@@ -213,6 +213,15 @@ test('cédula SEP: coincide el nombre → insignia; no coincide → 400', async 
   assert.equal(no.body.code, 'SEP_NO_MATCH');
 });
 
+test('cédula SEP: un técnico sin identidad verificada no puede validarla', async () => {
+  const t = await as(2, { aprobado: false });
+  sepResponse = { items: [{ nombre: 'TECNICO', paterno: 'PRUEBA', materno: 'X', titulo: 'INGENIERO' }] };
+  const res = await api(server.url, 'POST', '/api/tecnicos/validar-cedula', { token: t.token, body: { cedula: '1234567' } });
+  assert.equal(res.status, 403);
+  const row = await getPool().query('SELECT verificado_sep FROM usuarios WHERE id_usuario = $1', [t.id]);
+  assert.equal(row.rows[0].verificado_sep, false);
+});
+
 test('cédula SEP: servicio caído responde 503 sin aprobar por formato', async () => {
   const t = await as(2);
   const prev = process.env.SEP_URL;

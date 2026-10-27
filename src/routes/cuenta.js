@@ -22,14 +22,20 @@ router.put('/api/usuarios/perfil', auth, async (req, res) => {
   const values = [];
   const set = (column, value) => { values.push(value); updates.push(`${column} = $${values.length}`); };
 
+  // Con la identidad verificada, el nombre queda ligado al INE revisado: cambiarlo permitiría
+  // suplantar a otra persona o validar una cédula ajena. Solo soporte puede corregirlo.
+  const locked = req.user.identidad_verificada;
+  const identityLocked = () => fail(res, 409, 'IDENTITY_LOCKED', 'Tu nombre está ligado a tu identidad verificada. Si hay un error, escríbenos a soporte.', { field: 'nombre' });
   if (b.nombre !== undefined) {
     const nombre = sanitizeText(b.nombre, 100);
     if (!nombre) return fail(res, 400, 'VALIDATION_ERROR', 'El nombre no puede quedar vacío.', { field: 'nombre' });
+    if (locked && nombre !== req.user.nombre) return identityLocked();
     set('nombre', nombre);
   }
   if (b.apellido !== undefined || b.apellidos !== undefined) {
     const apellido = sanitizeText(b.apellido ?? b.apellidos, 100);
     if (!apellido) return fail(res, 400, 'VALIDATION_ERROR', 'Los apellidos no pueden quedar vacíos.', { field: 'apellido' });
+    if (locked && apellido !== req.user.apellido) return identityLocked();
     set('apellido', apellido);
   }
   if (b.telefono !== undefined) {

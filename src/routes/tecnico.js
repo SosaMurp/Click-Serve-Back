@@ -283,7 +283,8 @@ router.post('/api/tecnico/documentos', ...techOnly, uploader({ types: DOCUMENT_T
 const normalize = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().trim();
 
 // Consulta al Registro Nacional de Profesionistas con timeout de 5 s (RNF-36). Nunca aprueba por formato.
-router.post('/api/tecnicos/validar-cedula', ...techOnly, async (req, res) => {
+// Solo con identidad verificada: el nombre contra el que se compara la cédula debe ser el del INE revisado.
+router.post('/api/tecnicos/validar-cedula', ...techOnly, requireApproved, async (req, res) => {
   const cedula = String(req.body?.cedula || '').trim();
   if (!/^\d{7,8}$/.test(cedula)) return fail(res, 400, 'VALIDATION_ERROR', 'La cédula profesional tiene 7 u 8 dígitos.', { field: 'cedula' });
   const url = process.env.SEP_URL || 'https://www.cedulaprofesional.sep.gob.mx/cedula/buscaCedulaJson.action';
