@@ -12,11 +12,11 @@ const realtime = require('../lib/realtime');
 const { sendPush } = require('../lib/push');
 const { chargeCard } = require('../services/payments');
 const S = require('../services/solicitudes');
+const { nowMx } = require('../lib/dates');
 
 const router = express.Router();
 const db = () => getPool();
 
-const today = () => new Date().toISOString().slice(0, 10);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -54,12 +54,14 @@ router.post(
     if (direccion.length < 5) return fail(res, 400, 'VALIDATION_ERROR', 'Indica la dirección del servicio.', { field: 'direccion' });
     const categoria = await resolveCategory(b.categoria);
 
+    const ahora = nowMx();
     const fecha = b.fecha_preferida ? String(b.fecha_preferida) : null;
-    if (fecha && (!ISO_DATE.test(fecha) || fecha < today())) {
+    if (fecha && (!ISO_DATE.test(fecha) || fecha < ahora.fecha)) {
       return fail(res, 400, 'VALIDATION_ERROR', 'Elige una fecha de hoy en adelante.', { field: 'fecha_preferida' });
     }
     const hora = b.hora_preferida ? String(b.hora_preferida).slice(0, 5) : null;
     if (hora && !HHMM.test(hora)) return fail(res, 400, 'VALIDATION_ERROR', 'Elige una hora válida.', { field: 'hora_preferida' });
+    if (hora && fecha === ahora.fecha && hora < ahora.hora) return fail(res, 400, 'VALIDATION_ERROR', 'Esa hora ya pasó. Elige una más tarde.', { field: 'hora_preferida' });
     const lat = parseCoord(b.latitud, -90, 90);
     const lng = parseCoord(b.longitud, -180, 180);
 

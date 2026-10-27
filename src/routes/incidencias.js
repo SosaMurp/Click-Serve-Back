@@ -7,6 +7,7 @@ const { sanitizeText } = require('../lib/sanitize');
 const realtime = require('../lib/realtime');
 const { sendPush } = require('../lib/push');
 const S = require('../services/solicitudes');
+const { todayMx } = require('../lib/dates');
 
 const router = express.Router();
 
@@ -30,7 +31,7 @@ router.post('/api/solicitudes/:id/incidencias', auth, async (req, res) => {
     const row = await S.findRow(req.params.id, tx, { lock: true });
     if (!participant(row, req.user)) throw new HttpError(404, 'NOT_FOUND', 'Solicitud no encontrada.');
     if (row.estado === 'CANCELADA') throw new HttpError(409, 'INVALID_STATE', 'La solicitud está cancelada.');
-    if (row.estado === 'FINALIZADA' && tipo === 'GARANTIA' && (!row.garantia_hasta || row.garantia_hasta < new Date().toISOString().slice(0, 10))) {
+    if (row.estado === 'FINALIZADA' && tipo === 'GARANTIA' && (!row.garantia_hasta || row.garantia_hasta < todayMx())) {
       throw new HttpError(409, 'WARRANTY_EXPIRED', 'La garantía de 90 días de este servicio ya venció.');
     }
     const open = await tx.query("SELECT id_incidencia FROM incidencias WHERE id_solicitud = $1 AND estado = 'ABIERTA' AND tipo <> 'SEGURIDAD'", [row.id_solicitud]);
@@ -134,7 +135,7 @@ const RESCHEDULABLE = ['PENDIENTE', 'ASIGNADA', 'EN_CAMINO'];
 function parseSchedule(body) {
   const fecha = String(body?.fecha || '');
   const hora = String(body?.hora || '').slice(0, 5);
-  if (!ISO_DATE.test(fecha) || fecha < new Date().toISOString().slice(0, 10)) throw new HttpError(400, 'VALIDATION_ERROR', 'Elige una fecha de hoy en adelante.', { field: 'fecha' });
+  if (!ISO_DATE.test(fecha) || fecha < todayMx()) throw new HttpError(400, 'VALIDATION_ERROR', 'Elige una fecha de hoy en adelante.', { field: 'fecha' });
   if (!HHMM.test(hora)) throw new HttpError(400, 'VALIDATION_ERROR', 'Elige una hora válida.', { field: 'hora' });
   return { fecha, hora, motivo: sanitizeText(body?.motivo, 300) || null };
 }

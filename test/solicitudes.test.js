@@ -123,6 +123,21 @@ test('un técnico suspendido no se puede proponer y su latido lo deja fuera de l
   assert.equal(latido.body.disponible, false);
 });
 
+test('programar para hoy a una hora que ya pasó se rechaza; hoy en México sí se acepta', async () => {
+  const { nowMx } = require('../src/lib/dates');
+  const c = await cliente();
+  const ahora = nowMx();
+  if (ahora.hora !== '00:00') {
+    const pasada = await crearSolicitud(c.token, { fecha_preferida: ahora.fecha, hora_preferida: '00:00' });
+    assert.equal(pasada.status, 400);
+    assert.equal(pasada.body.field, 'hora_preferida');
+  }
+  if (ahora.hora < '23:58') {
+    const luego = await crearSolicitud(c.token, { fecha_preferida: ahora.fecha, hora_preferida: '23:59' });
+    assert.equal(luego.status, 201);
+  }
+});
+
 test('un cliente pendiente de aprobación no puede crear solicitudes', async () => {
   const c = await cliente({ aprobado: false });
   const res = await crearSolicitud(c.token);
