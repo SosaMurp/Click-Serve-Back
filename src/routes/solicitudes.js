@@ -119,21 +119,10 @@ router.get('/api/solicitudes/tecnico', auth, requireRole(ROL.TECNICO), async (re
     : 'NULL::numeric';
   const params = loc.latitud != null ? [me, loc.latitud, loc.longitud] : [me];
 
-  const nuevasWhere = `s.estado = 'PENDIENTE'
-    AND NOT EXISTS (SELECT 1 FROM solicitudes_descartadas d WHERE d.id_solicitud = s.id_solicitud AND d.id_tecnico = $1)
-    AND (s.id_tecnico_propuesto IS NULL OR s.id_tecnico_propuesto = $1 OR s.propuesto_hasta < NOW())
-    AND (s.categoria IS NULL
-         OR NOT EXISTS (SELECT 1 FROM especialidades_tecnico e WHERE e.id_usuario = $1 AND e.categoria IS NOT NULL)
-         OR EXISTS (SELECT 1 FROM especialidades_tecnico e WHERE e.id_usuario = $1 AND e.categoria = s.categoria AND e.activa))`;
-  const enCursoWhere = `s.id_tecnico = $1 AND s.estado = ANY('{${S.ACTIVE_STATES.join(',')}}')`;
-  const historialWhere = `s.id_tecnico = $1 AND s.estado IN ('FINALIZADA', 'CANCELADA')`;
-
-  const counts = await db().query(
-    `SELECT (SELECT COUNT(*)::int FROM solicitudes_servicio s WHERE ${nuevasWhere}) AS nuevas,
-            (SELECT COUNT(*)::int FROM solicitudes_servicio s WHERE ${enCursoWhere}) AS en_curso,
-            (SELECT COUNT(*)::int FROM solicitudes_servicio s WHERE ${historialWhere}) AS historial`,
-    [me]
-  );
+  const nuevasWhere = S.TECH_WHERE.nuevas;
+  const enCursoWhere = S.TECH_WHERE.en_curso;
+  const historialWhere = S.TECH_WHERE.historial;
+  const contadores = await S.techCounters(me);
 
   let where;
   let order;
@@ -158,7 +147,7 @@ router.get('/api/solicitudes/tecnico', auth, requireRole(ROL.TECNICO), async (re
   );
   res.json({
     solicitudes: rows.map((r) => S.shape(r, req.user, { distancia_km: r.distancia_km == null ? null : Number(r.distancia_km), propuesta_a_mi: r.id_tecnico_propuesto === me && new Date(r.propuesto_hasta) > new Date() })),
-    contadores: counts.rows[0],
+    contadores,
   });
 });
 
@@ -197,8 +186,11 @@ router.get('/api/tecnicos/recomendados', auth, async (req, res) => {
        AND UPPER(COALESCE(u.estado_cuenta, '')) IN ('ACTIVO', 'APROBADO')
        AND u.disponible = true AND u.ultimo_latido > NOW() - INTERVAL '90 seconds' AND u.latitud IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM solicitudes_descartadas d WHERE d.id_solicitud = $3 AND d.id_tecnico = u.id_usuario)
-       AND ($4::text IS NULL OR EXISTS (SELECT 1 FROM especialidades_tecnico e WHERE e.id_usuario = u.id_usuario AND e.categoria = $4 AND e.activa))
-     ORDER BY distancia_km ASC, calificacion DESC NULLS LAST
+       AND ($4::text IS NULL
+            OR NOT EXISTS (SELECT 1 FROM especialidades_tecnico e WHERE e.id_usuario = u.id_usuario AND e.categoria IS NOT NULL)
+            OR EXISTS (SELECT 1 FROM especialidades_tecnico e WHERE e.id_usuario = u.id_usuario AND e.categoria = $4 AND e.activa))
+     ORDER BY EXISTS (SELECT 1 FROM especialidades_tecnico e WHERE e.id_usuario = u.id_usuario AND e.categoria = $4 AND e.activa) DESC,
+              distancia_km ASC, calificacion DESC NULLS LAST
      LIMIT 10`,
     [lat, lng, row.id_solicitud, row.categoria]
   );

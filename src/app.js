@@ -32,6 +32,8 @@ function createApp() {
   app.use(require('./routes/cuenta'));
   app.use(require('./routes/solicitudes'));
   app.use(require('./routes/incidencias'));
+  app.use(require('./routes/pagos'));
+  app.use(require('./routes/tecnico'));
 
   // Rutas del index.js original que aún no se portan.
   registerLegacy(app);

@@ -247,6 +247,28 @@ async function detail(row, viewer, db = getPool()) {
   });
 }
 
+// Filtros del panel del técnico ($1 = id del técnico), compartidos por la lista y el resumen.
+const TECH_WHERE = {
+  nuevas: `s.estado = 'PENDIENTE'
+    AND NOT EXISTS (SELECT 1 FROM solicitudes_descartadas d WHERE d.id_solicitud = s.id_solicitud AND d.id_tecnico = $1)
+    AND (s.id_tecnico_propuesto IS NULL OR s.id_tecnico_propuesto = $1 OR s.propuesto_hasta < NOW())
+    AND (s.categoria IS NULL
+         OR NOT EXISTS (SELECT 1 FROM especialidades_tecnico e WHERE e.id_usuario = $1 AND e.categoria IS NOT NULL)
+         OR EXISTS (SELECT 1 FROM especialidades_tecnico e WHERE e.id_usuario = $1 AND e.categoria = s.categoria AND e.activa))`,
+  en_curso: `s.id_tecnico = $1 AND s.estado = ANY('{${ACTIVE_STATES.join(',')}}')`,
+  historial: `s.id_tecnico = $1 AND s.estado IN ('FINALIZADA', 'CANCELADA')`,
+};
+
+async function techCounters(idTecnico, db = getPool()) {
+  const { rows } = await db.query(
+    `SELECT (SELECT COUNT(*)::int FROM solicitudes_servicio s WHERE ${TECH_WHERE.nuevas}) AS nuevas,
+            (SELECT COUNT(*)::int FROM solicitudes_servicio s WHERE ${TECH_WHERE.en_curso}) AS en_curso,
+            (SELECT COUNT(*)::int FROM solicitudes_servicio s WHERE ${TECH_WHERE.historial}) AS historial`,
+    [idTecnico]
+  );
+  return rows[0];
+}
+
 function notify(row, aviso, { push } = {}) {
   const data = { id_solicitud: Number(row.id_solicitud), estado: row.estado, aviso };
   realtime.emitToUsers([row.id_usuario, row.id_tecnico], 'solicitud.actualizada', data);
@@ -257,5 +279,5 @@ function notify(row, aviso, { push } = {}) {
 
 module.exports = {
   ACTIVE_STATES, CLOSED_STATES, LEGACY_CATEGORIES, BASE_SELECT,
-  taskTemplate, folio, parseMoney, shape, findRow, canView, detail, notify,
+  TECH_WHERE, techCounters, taskTemplate, folio, parseMoney, shape, findRow, canView, detail, notify,
 };
