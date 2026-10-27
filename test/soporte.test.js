@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const WebSocket = require('ws');
 const { resetDb, startServer, createUser, api, login, idem, closePool } = require('./helpers');
+const realtime = require('../src/lib/realtime');
 
 let server;
 test.before(async () => { await resetDb(); server = await startServer(); });
@@ -123,4 +124,15 @@ test('WebSocket: el técnico recibe en tiempo real el mensaje del cliente', asyn
   const msg = await waiting;
   assert.equal(msg.data.mensaje, '¿Trae su escalera?');
   ws.close();
+});
+
+test('WebSocket: al cerrar la sesión se corta la conexión abierta', async () => {
+  const c = await as(1);
+  const ws = new WebSocket(wsUrl(c.token));
+  await nextEvent(ws, 'conectado');
+  const closed = new Promise((resolve) => ws.on('close', (code) => resolve(code)));
+  assert.equal((await api(server.url, 'POST', '/api/logout', { token: c.token })).status, 200);
+  await realtime.revalidateSessions();
+  const code = await Promise.race([closed, new Promise((resolve) => setTimeout(() => resolve('abierta'), 2000))]);
+  assert.equal(code, 4401);
 });

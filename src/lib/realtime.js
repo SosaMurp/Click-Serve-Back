@@ -6,10 +6,11 @@ const clients = new Map();
 let wss = null;
 let pingTimer = null;
 
-function register(userId, ws) {
+function register(userId, ws, session) {
   const id = Number(userId);
   if (!clients.has(id)) clients.set(id, new Set());
   clients.get(id).add(ws);
+  ws.session = session;
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
   ws.on('close', () => {
@@ -44,7 +45,8 @@ function attach(server) {
       const decoded = verifyToken(url.searchParams.get('token') || '');
       const result = await loadSessionUser(decoded);
       if (result.error) throw new Error(result.error);
-      wss.handleUpgrade(req, socket, head, (ws) => register(result.user.id_usuario, ws));
+      const session = { id: result.user.sessionId, version: result.user.version_sesion };
+      wss.handleUpgrade(req, socket, head, (ws) => register(result.user.id_usuario, ws, session));
     } catch {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       socket.destroy();
@@ -52,6 +54,7 @@ function attach(server) {
   });
 
   pingTimer = setInterval(() => {
+    revalidateSessions().catch((error) => console.error('No se pudieron revalidar las sesiones del WebSocket:', error.message));
     for (const set of clients.values()) {
       for (const ws of set) {
         if (!ws.isAlive) {
@@ -65,6 +68,24 @@ function attach(server) {
   }, 25000);
   pingTimer.unref();
   return wss;
+}
+
+// La sesión solo se valida al conectar; en cada ping se revisa de nuevo para cortar los sockets de
+// sesiones cerradas, revocadas desde otro dispositivo, con contraseña cambiada o cuentas borradas.
+async function revalidateSessions() {
+  const sockets = [...clients.values()].flatMap((set) => [...set]).filter((ws) => ws.session);
+  if (sockets.length === 0) return;
+  const { getPool } = require('../db/pool');
+  const { rows } = await getPool().query(
+    `SELECT s.id_sesion::text AS id, u.version_sesion
+     FROM sesiones_activas s JOIN usuarios u ON u.id_usuario = s.id_usuario
+     WHERE s.id_sesion = ANY($1::uuid[]) AND s.estado = 'activa' AND u.anonimizado = false AND s.id_rol = u.id_rol`,
+    [[...new Set(sockets.map((ws) => ws.session.id))]]
+  );
+  const vigentes = new Map(rows.map((r) => [r.id, r.version_sesion || 1]));
+  for (const ws of sockets) {
+    if (vigentes.get(String(ws.session.id)) !== ws.session.version) ws.close(4401, 'Sesión terminada');
+  }
 }
 
 function emitToUser(userId, event, data) {
@@ -94,4 +115,4 @@ function closeAll() {
   wss = null;
 }
 
-module.exports = { attach, emitToUser, emitToUsers, isOnline, closeAll };
+module.exports = { attach, emitToUser, emitToUsers, isOnline, closeAll, revalidateSessions };
