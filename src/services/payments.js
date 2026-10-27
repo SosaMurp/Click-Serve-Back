@@ -44,15 +44,20 @@ async function chargeCard({ token, amount, description, customer }) {
         line_items: [{ name: description, unit_price: Math.round(Number(amount) * 100), quantity: 1 }],
         charges: [{ payment_method: { type: 'card', token_id: token } }],
       }),
-    });
+    }, 15000);
+    // Un 5xx de Conekta no dice si la orden se creó: se trata como cobro incierto, no como rechazo.
+    if (res.status >= 500) {
+      return { ok: false, modo: 'CONEKTA', unavailable: true, uncertain: true, motivo: 'La pasarela de pago no confirmó el cobro.' };
+    }
     const body = await res.json().catch(() => ({}));
     if (!res.ok || body.payment_status !== 'paid') {
       return { ok: false, modo: 'CONEKTA', motivo: body?.details?.[0]?.message || 'El pago fue rechazado.' };
     }
     return { ok: true, modo: 'CONEKTA', referencia: body.id };
   } catch (error) {
+    // La petición pudo llegar a Conekta antes del corte: tampoco se sabe si se cobró.
     const timeout = error.name === 'AbortError';
-    return { ok: false, modo: 'CONEKTA', unavailable: true, motivo: timeout ? 'La pasarela de pago no respondió a tiempo.' : 'La pasarela de pago no está disponible.' };
+    return { ok: false, modo: 'CONEKTA', unavailable: true, uncertain: true, motivo: timeout ? 'La pasarela de pago no respondió a tiempo.' : 'La pasarela de pago no está disponible.' };
   }
 }
 

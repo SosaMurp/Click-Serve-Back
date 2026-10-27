@@ -549,24 +549,39 @@ router.post('/api/solicitudes/:id/confirmar', auth, requireRole(ROL.CLIENTE), id
   }
   const comentario = sanitizeText(req.body?.comentario, 500) || null;
 
-  const out = await withTransaction(async (tx) => {
-    const row = await S.findRow(req.params.id, tx, { lock: true });
-    if (!row || row.id_usuario !== req.user.id_usuario) throw new HttpError(404, 'NOT_FOUND', 'Solicitud no encontrada.');
-    if (row.estado !== 'POR_CONFIRMAR') throw new HttpError(409, 'INVALID_STATE', 'Este servicio no está listo para confirmarse.');
-    const metodo = (await tx.query('SELECT id_metodo, token FROM metodos_pago WHERE id_metodo = $1 AND id_usuario = $2', [idMetodo, req.user.id_usuario])).rows[0];
-    if (!metodo?.token) throw new HttpError(400, 'PAYMENT_METHOD_REQUIRED', 'Selecciona una tarjeta guardada para pagar.');
-
-    const liq = (await tx.query('SELECT * FROM cs_liquidacion($1)', [row.monto_total])).rows[0];
-    const charge = await chargeCard({
-      token: metodo.token,
-      amount: liq.total,
-      description: `Servicio ${row.folio}`,
-      customer: { nombre: `${row.cliente_nombre} ${row.cliente_apellido}`, correo: req.user.correo, telefono: row.cliente_telefono },
-    });
-    if (!charge.ok) {
-      throw new HttpError(charge.unavailable ? 503 : 402, charge.unavailable ? 'PAYMENT_UNAVAILABLE' : 'PAYMENT_DECLINED', charge.motivo);
+  // Paso 1: reserva el cobro (estado_pago = PROCESANDO) en su propia transacción. Si la pasarela no
+  // responde o el registro falla después de cobrar, la reserva sigue ahí y ningún reintento vuelve a cobrar.
+  const { row, metodo, liq } = await withTransaction(async (tx) => {
+    const current = await S.findRow(req.params.id, tx, { lock: true });
+    if (!current || current.id_usuario !== req.user.id_usuario) throw new HttpError(404, 'NOT_FOUND', 'Solicitud no encontrada.');
+    if (current.estado_pago === 'PROCESANDO') {
+      throw new HttpError(409, 'PAYMENT_IN_PROGRESS', 'Estamos confirmando tu pago anterior con el banco. No se te cobrará dos veces; si no se resuelve en unos minutos, escribe a soporte.');
     }
+    if (current.estado !== 'POR_CONFIRMAR') throw new HttpError(409, 'INVALID_STATE', 'Este servicio no está listo para confirmarse.');
+    const card = (await tx.query('SELECT id_metodo, token FROM metodos_pago WHERE id_metodo = $1 AND id_usuario = $2', [idMetodo, req.user.id_usuario])).rows[0];
+    if (!card?.token) throw new HttpError(400, 'PAYMENT_METHOD_REQUIRED', 'Selecciona una tarjeta guardada para pagar.');
+    await tx.query("UPDATE solicitudes_servicio SET estado_pago = 'PROCESANDO' WHERE id_solicitud = $1", [current.id_solicitud]);
+    return { row: current, metodo: card, liq: (await tx.query('SELECT * FROM cs_liquidacion($1)', [current.monto_total])).rows[0] };
+  });
 
+  const charge = await chargeCard({
+    token: metodo.token,
+    amount: liq.total,
+    description: `Servicio ${row.folio}`,
+    customer: { nombre: `${row.cliente_nombre} ${row.cliente_apellido}`, correo: req.user.correo, telefono: row.cliente_telefono },
+  });
+  if (!charge.ok) {
+    if (charge.uncertain) {
+      audit(req, 'PAGO_INCIERTO', 'solicitud', row.id_solicitud, { motivo: charge.motivo, monto: liq.total });
+      return fail(res, 503, 'PAYMENT_UNCERTAIN', 'El banco no confirmó el cobro a tiempo. Para no cobrarte dos veces lo revisaremos y te avisaremos; no intentes pagar de nuevo.');
+    }
+    await db().query("UPDATE solicitudes_servicio SET estado_pago = 'PENDIENTE' WHERE id_solicitud = $1 AND estado_pago = 'PROCESANDO'", [row.id_solicitud]);
+    return fail(res, charge.unavailable ? 503 : 402, charge.unavailable ? 'PAYMENT_UNAVAILABLE' : 'PAYMENT_DECLINED', charge.motivo);
+  }
+
+  // Paso 2: registra el pago ya cobrado. Si esto falla, la orden queda en PROCESANDO con la referencia
+  // en auditoría para conciliarla, en vez de liberar la orden para un segundo cargo.
+  const out = await withTransaction(async (tx) => {
     const desglose = {
       total: liq.total, comision: liq.comision, base: liq.base,
       retencion_isr: liq.retencion_isr, retencion_iva: liq.retencion_iva, neto_tecnico: liq.neto_tecnico,
@@ -599,6 +614,10 @@ router.post('/api/solicitudes/:id/confirmar', auth, requireRole(ROL.CLIENTE), id
       await upsertRating(tx, row, { puntuacion_tecnico: calificacion, comentario_cliente: comentario });
     }
     return { row: await S.findRow(row.id_solicitud, tx), pago, desglose };
+  }).catch((error) => {
+    console.error(`Cobro ${charge.referencia} de ${row.folio} sin registrar:`, error.message);
+    audit(req, 'PAGO_SIN_REGISTRAR', 'solicitud', row.id_solicitud, { referencia: charge.referencia, modo: charge.modo, monto: liq.total });
+    throw error;
   });
 
   audit(req, 'PAGO_REALIZADO', 'solicitud', out.row.id_solicitud, { monto: out.pago.monto, modo: out.pago.modo });

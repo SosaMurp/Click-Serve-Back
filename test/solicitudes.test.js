@@ -204,6 +204,52 @@ test('tarjeta declinada responde 402 y la orden sigue por confirmar', async () =
   assert.equal(row.rows[0].estado, 'POR_CONFIRMAR');
 });
 
+test('tras un rechazo, el reintento con otra tarjeta y la misma clave sí cobra', async () => {
+  const { c, t, id } = await hastaEnProceso();
+  await subirEvidencia(t.token, id);
+  await api(server.url, 'POST', `/api/solicitudes/${id}/finalizar`, { token: t.token, headers: idem() });
+  const mala = await tarjeta(c.id, 'tok_test_card_declined', '0002');
+  const buena = await tarjeta(c.id);
+  const headers = idem();
+  const rechazo = await api(server.url, 'POST', `/api/solicitudes/${id}/confirmar`, { token: c.token, headers, body: { id_metodo: mala } });
+  assert.equal(rechazo.status, 402);
+  const pago = await api(server.url, 'POST', `/api/solicitudes/${id}/confirmar`, { token: c.token, headers, body: { id_metodo: buena } });
+  assert.equal(pago.status, 200);
+  assert.equal(pago.body.solicitud.estado, 'FINALIZADA');
+});
+
+test('si la pasarela no confirma el cobro, la orden queda en PROCESANDO y un reintento no vuelve a cobrar', async () => {
+  const { c, t, id } = await hastaEnProceso();
+  await subirEvidencia(t.token, id);
+  await api(server.url, 'POST', `/api/solicitudes/${id}/finalizar`, { token: t.token, headers: idem() });
+  const metodo = await tarjeta(c.id);
+  const realFetch = global.fetch;
+  let cobros = 0;
+  // Conekta recibe la orden pero la respuesta no llega a tiempo: no se sabe si se cobró.
+  global.fetch = async (url, opts) => {
+    if (String(url).startsWith('https://api.conekta.io')) {
+      cobros += 1;
+      throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+    }
+    return realFetch(url, opts);
+  };
+  process.env.CONEKTA_PRIVATE_KEY = 'key_prueba';
+  try {
+    const a = await api(server.url, 'POST', `/api/solicitudes/${id}/confirmar`, { token: c.token, headers: idem(), body: { id_metodo: metodo } });
+    assert.equal(a.status, 503);
+    assert.equal(a.body.code, 'PAYMENT_UNCERTAIN');
+    const b = await api(server.url, 'POST', `/api/solicitudes/${id}/confirmar`, { token: c.token, headers: idem(), body: { id_metodo: metodo } });
+    assert.equal(b.status, 409);
+    assert.equal(b.body.code, 'PAYMENT_IN_PROGRESS');
+    assert.equal(cobros, 1);
+    const row = await getPool().query('SELECT estado, estado_pago FROM solicitudes_servicio WHERE id_solicitud = $1', [id]);
+    assert.deepEqual(row.rows[0], { estado: 'POR_CONFIRMAR', estado_pago: 'PROCESANDO' });
+  } finally {
+    global.fetch = realFetch;
+    delete process.env.CONEKTA_PRIVATE_KEY;
+  }
+});
+
 test('concepto extra durante el trabajo recalcula el total en el servidor', async () => {
   const { t, id } = await hastaEnProceso();
   const res = await api(server.url, 'POST', `/api/solicitudes/${id}/conceptos`, {
