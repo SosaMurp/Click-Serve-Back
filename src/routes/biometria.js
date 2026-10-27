@@ -79,13 +79,14 @@ router.post(
        WHERE id_verificacion = $3 RETURNING id_verificacion, estado, resultado, fecha_resolucion`,
       [estado, JSON.stringify(model), ver.id_verificacion]
     );
+    // Solo registra el resultado biométrico. La referencia la subió la misma persona, así que una
+    // coincidencia no prueba identidad: identidad_verificada solo la otorga la revisión del administrador.
     await db().query(
-      `UPDATE usuarios SET biometria_estado = $1, identidad_verificada = identidad_verificada OR $2, fecha_actualizacion = NOW()
-       WHERE id_usuario = $3`,
-      [aprobado ? 'verificada' : 'rechazada', aprobado, req.user.id_usuario]
+      'UPDATE usuarios SET biometria_estado = $1, fecha_actualizacion = NOW() WHERE id_usuario = $2',
+      [aprobado ? 'verificada' : 'rechazada', req.user.id_usuario]
     );
     audit(req, `BIOMETRIA_${estado}`, 'verificacion', ver.id_verificacion, { distancia: model.distance });
-    if (aprobado) realtime.emitToUser(req.user.id_usuario, 'cuenta.aprobada', { aviso: 'Verificamos tu identidad.' });
+    if (aprobado) realtime.emitToUser(req.user.id_usuario, 'biometria.verificada', { aviso: 'Confirmamos que tu rostro coincide con tu registro.' });
     res.json({ ...rows[0], match: aprobado, distance: model.distance, confidence: model.confidence });
   }
 );

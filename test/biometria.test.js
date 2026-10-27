@@ -42,7 +42,7 @@ function liveForm() {
   return form;
 }
 
-test('la comparación usa la foto del registro y aprueba la identidad del técnico', async () => {
+test('la comparación usa la foto del registro y NO aprueba la identidad (eso lo decide el administrador)', async () => {
   const t = await tecnicoConRostro();
   const v = await api(server.url, 'POST', '/api/biometria/solicitar', { token: t.token });
   assert.equal(v.status, 201);
@@ -53,7 +53,9 @@ test('la comparación usa la foto del registro y aprueba la identidad del técni
   assert.ok(recibidos[0].includes('rostro-registro'), 'se envió la referencia guardada, no una del cliente');
   const me = await api(server.url, 'GET', '/api/me', { token: t.token });
   assert.equal(me.body.usuario.biometria_estado, 'verificada');
-  assert.equal(me.body.usuario.aprobado, true);
+  // Una selfie contra una foto que subió la misma persona no prueba identidad (hallazgo de seguridad H1).
+  assert.equal(me.body.usuario.identidad_verificada, false);
+  assert.equal(me.body.usuario.aprobado, false);
 });
 
 test('rostro que no coincide queda RECHAZADO y no aprueba', async () => {
