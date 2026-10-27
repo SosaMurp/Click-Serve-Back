@@ -312,15 +312,19 @@ router.post('/api/reset-password', codeLimiter, async (req, res) => {
   const user = await findUserByEmail(req.body?.email);
   if (!user) return fail(res, 403, 'RESET_NOT_VERIFIED', 'Verifica tu código de seguridad antes de cambiar la contraseña.');
 
-  // reset_token obligatorio; el panel anterior (sin token) solo dentro de 10 min tras verificar.
+  // reset_token siempre obligatorio: sin él, cualquiera que conozca el correo podría fijar la contraseña
+  // durante los 10 minutos posteriores a que la persona verificó su código.
   const resetToken = String(req.body?.reset_token || '');
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resetToken)) {
+    return fail(res, 403, 'RESET_NOT_VERIFIED', 'Verifica tu código de seguridad antes de cambiar la contraseña.');
+  }
   const { rows } = await getPool().query(
     `SELECT id_token FROM tokens_temporales
      WHERE id_usuario = $1 AND tipo_accion = 'recuperacion' AND estado_uso = 'verificado'
        AND fecha_verificacion > NOW() - INTERVAL '10 minutes'
-       AND ($2 = '' OR reset_token::text = $2)
+       AND reset_token::text = $2
      ORDER BY id_token DESC LIMIT 1`,
-    [user.id_usuario, resetToken]
+    [user.id_usuario, resetToken.toLowerCase()]
   );
   if (!rows[0]) return fail(res, 403, 'RESET_NOT_VERIFIED', 'Verifica tu código de seguridad antes de cambiar la contraseña.');
 

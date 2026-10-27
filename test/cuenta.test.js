@@ -100,6 +100,11 @@ test('recuperación completa con reset_token y contraseña nueva', async () => {
   const ver = await api(server.url, 'POST', '/api/verify-recovery', { body: { email: user.email, token: code } });
   assert.equal(ver.status, 200);
   assert.ok(ver.body.reset_token);
+  // Sin el reset_token (o con uno ajeno) nadie puede cambiarla, aunque la persona ya haya verificado su código.
+  const sinToken = await api(server.url, 'POST', '/api/reset-password', { body: { email: user.email, newPassword: 'Atacante#2026' } });
+  assert.equal(sinToken.status, 403);
+  const otroToken = await api(server.url, 'POST', '/api/reset-password', { body: { email: user.email, reset_token: '00000000-0000-4000-8000-000000000000', newPassword: 'Atacante#2026' } });
+  assert.equal(otroToken.status, 403);
   const weak = await api(server.url, 'POST', '/api/reset-password', { body: { email: user.email, reset_token: ver.body.reset_token, newPassword: 'corta' } });
   assert.equal(weak.status, 400);
   const ok = await api(server.url, 'POST', '/api/reset-password', { body: { email: user.email, reset_token: ver.body.reset_token, newPassword: 'NuevaClave#1' } });
@@ -165,7 +170,7 @@ test('2FA: tres códigos incorrectos destruyen el reto', async () => {
 });
 
 test('perfil y preferencias se guardan en la base', async () => {
-  const user = await createUser();
+  const user = await createUser({ aprobado: false });
   const token = await login(server.url, user);
   const perfil = await api(server.url, 'PUT', '/api/usuarios/perfil', { token, body: { nombre: 'Rosa', apellido: 'Díaz', telefono: '7539876543' } });
   assert.equal(perfil.status, 200);
@@ -174,6 +179,19 @@ test('perfil y preferencias se guardan en la base', async () => {
   const me = await api(server.url, 'GET', '/api/me', { token });
   assert.equal(me.body.usuario.nombre, 'Rosa');
   assert.deepEqual(me.body.usuario.preferencias, { notificaciones_push: false, notificaciones_email: true });
+});
+
+test('con la identidad verificada el nombre ya no se puede cambiar; teléfono y presentación sí', async () => {
+  const user = await createUser();
+  const token = await login(server.url, user);
+  const rename = await api(server.url, 'PUT', '/api/usuarios/perfil', { token, body: { nombre: 'Juan', apellido: 'López' } });
+  assert.equal(rename.status, 409);
+  assert.equal(rename.body.code, 'IDENTITY_LOCKED');
+  const same = await api(server.url, 'PUT', '/api/usuarios/perfil', { token, body: { nombre: 'Cliente', apellido: 'Prueba', telefono: '7531112233', bio: 'Hola' } });
+  assert.equal(same.status, 200);
+  const me = await api(server.url, 'GET', '/api/me', { token });
+  assert.equal(me.body.usuario.nombre, 'Cliente');
+  assert.equal(me.body.usuario.telefono, '7531112233');
 });
 
 test('teléfono con formato inválido responde 400', async () => {
