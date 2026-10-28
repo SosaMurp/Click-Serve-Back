@@ -22,7 +22,7 @@ const MOTIVOS = {
 // ───────── Calidad de la foto ─────────
 // Umbrales calibrados con imágenes de prueba a 640 px de ancho; son tolerantes a propósito:
 // lo que pase de aquí lo filtra el OCR.
-const UMBRAL = { oscuro: 50, claro: 240, reflejo: 0.15, nitidez: 25, minLado: 600 };
+const UMBRAL = { oscuro: 50, claro: 240, reflejo: 0.15, nitidez: 25, minLado: 500 };
 
 async function analyzeQuality(buffer) {
   let meta;
