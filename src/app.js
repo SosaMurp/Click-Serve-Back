@@ -31,6 +31,7 @@ function createApp() {
 
   app.use(require('./routes/archivos'));
   app.use(require('./routes/auth'));
+  app.use(require('./routes/social'));
   app.use(require('./routes/cuenta'));
   app.use(require('./routes/solicitudes'));
   app.use(require('./routes/incidencias'));
