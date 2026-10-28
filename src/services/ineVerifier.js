@@ -23,6 +23,10 @@ const MOTIVOS = {
 // Umbrales calibrados con imágenes de prueba a 640 px de ancho; son tolerantes a propósito:
 // lo que pase de aquí lo filtra el OCR.
 const UMBRAL = { oscuro: 50, claro: 240, reflejo: 0.15, nitidez: 25, minLado: 500 };
+// La ruta es pública: una imagen de pocos KB con dimensiones enormes haría que sharp reservara cientos
+// de MB al decodificarla. El encabezado se lee sin decodificar y se rechaza antes (50 MP sobra para
+// una foto de celular; la app manda fotos de ≤1600 px).
+const MAX_PIXELES = 50_000_000;
 
 async function analyzeQuality(buffer) {
   let meta;
@@ -30,6 +34,9 @@ async function analyzeQuality(buffer) {
     meta = await sharp(buffer).metadata();
   } catch {
     return { ok: false, motivo: 'No pudimos abrir la foto. Tómala otra vez.' };
+  }
+  if ((meta.width || 0) * (meta.height || 0) > MAX_PIXELES) {
+    return { ok: false, motivo: 'La foto es demasiado grande. Tómala otra vez con la cámara de la app.' };
   }
   if (Math.max(meta.width || 0, meta.height || 0) < UMBRAL.minLado) {
     return { ok: false, motivo: 'La foto es muy pequeña. Acerca la credencial a la cámara.' };

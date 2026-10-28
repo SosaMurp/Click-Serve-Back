@@ -107,3 +107,13 @@ test('sin INE_PROVIDER el proveedor externo está apagado', async () => {
   assert.equal(provider.isEnabled(), false);
   await assert.rejects(provider.validarEnListaNominal({}), { code: 'PROVIDER_DISABLED' });
 });
+
+test('una imagen de dimensiones enormes se rechaza sin decodificarla', async () => {
+  const sharp = require('sharp');
+  const { analyzeQuality, closeOcr } = require('../src/services/ineVerifier');
+  const huge = await sharp({ create: { width: 9000, height: 7000, channels: 3, background: '#ffffff' } }).png({ compressionLevel: 9 }).toBuffer();
+  const r = await analyzeQuality(huge);
+  assert.equal(r.ok, false);
+  assert.match(r.motivo, /demasiado grande/);
+  await closeOcr();
+});
