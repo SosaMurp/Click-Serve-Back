@@ -15,6 +15,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@tesseract.js-data/spa": "^1.0.0",
     "bcrypt": "^6.0.0",
     "compression": "^1.8.2",
     "conekta": "^9.0.6",
@@ -26,6 +28,8 @@
     "multer": "^2.4.0",
     "nodemailer": "^8.0.7",
     "pg": "^8.20.0",
+    "sharp": "^0.34.5",
+    "tesseract.js": "^6.0.1",
     "twilio": "^6.0.2",
     "ws": "^8.22.0"
   },

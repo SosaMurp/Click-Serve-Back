@@ -62,7 +62,9 @@ function findMrz(text) {
     const start = lines[i].search(/[I1]DMEX/);
     if (start < 0) continue;
     const l1 = to30(`ID${lines[i].slice(start + 2)}`);
-    return [fixDigits(l1, L1_DIGITS), fixDigits(to30(lines[i + 1]), L2_DIGITS), to30(lines[i + 2])];
+    // El relleno final de los nombres (<<<<) a veces se lee como LLLL o KKKK.
+    const l3 = to30(lines[i + 2]).replace(/<[LK<]{2,}$/, (m) => '<'.repeat(m.length));
+    return [fixDigits(l1, L1_DIGITS), fixDigits(to30(lines[i + 1]), L2_DIGITS), l3];
   }
   return null;
 }

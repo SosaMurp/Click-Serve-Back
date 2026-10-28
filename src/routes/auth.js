@@ -14,6 +14,7 @@ const { saveFile, uploader, IMAGE_TYPES } = require('../lib/files');
 const { signSession } = require('../lib/tokens');
 const { findUserByEmail, findUserById, publicUser, createSession } = require('../services/users');
 const { finishLogin } = require('../services/login');
+const { readTicket, registroKey, sha256 } = require('../lib/ine/ticket');
 
 const router = express.Router();
 
@@ -197,6 +198,18 @@ router.post('/api/register', registerLimiter, registroUpload, async (req, res) =
     return fail(res, 400, 'DOCUMENTS_REQUIRED', 'Fotografía el frente y reverso de tu INE y tu rostro para verificar tu identidad.');
   }
 
+  // RF-25: la INE debe venir verificada por POST /api/ine/verificar: un ticket por lado, ligado a la misma
+  // imagen que se sube, a la misma CURP y a los mismos nombre y fecha de nacimiento del registro.
+  const persona = registroKey({ nombre, apellidos: apellido, fecha_nacimiento: fecha });
+  const tFrente = readTicket(b.ticket_ine_frente);
+  const tReverso = readTicket(b.ticket_ine_reverso);
+  const ineOk = tFrente && tReverso && tFrente.lado === 'frente' && tReverso.lado === 'reverso'
+    && tFrente.hash === sha256(files.INE_FRENTE.buffer) && tReverso.hash === sha256(files.INE_REVERSO.buffer)
+    && tFrente.curp && tFrente.curp === tReverso.curp && tFrente.persona === persona && tReverso.persona === persona;
+  if (!ineOk) {
+    return fail(res, 400, 'INE_NOT_VERIFIED', 'Toma de nuevo las fotos de tu credencial: necesitamos verificarla antes de crear tu cuenta.');
+  }
+
   const hash = await bcrypt.hash(password, 10);
   let created;
   try {
@@ -212,6 +225,12 @@ router.post('/api/register', registerLimiter, registroUpload, async (req, res) =
       for (const [tipo, file] of Object.entries(files)) {
         const idArchivo = await saveFile(db, { owner: user.id_usuario, buffer: file.buffer, mime: file.mimetype, name: file.originalname, categoria: tipo === 'ROSTRO' ? 'ROSTRO' : 'INE' });
         await db.query('INSERT INTO documentos_usuario (id_usuario, tipo, id_archivo) VALUES ($1, $2, $3)', [user.id_usuario, tipo, idArchivo]);
+      }
+      for (const t of [tFrente, tReverso]) {
+        await db.query(
+          'INSERT INTO verificaciones_ine (id_usuario, lado, curp, comprobaciones, hash_imagen) VALUES ($1, $2, $3, $4::jsonb, $5)',
+          [user.id_usuario, t.lado, t.curp, JSON.stringify(t.comprobaciones || []), t.hash]
+        );
       }
       const code = await issueCode(db, user.id_usuario, 'registro');
       return { user, code };

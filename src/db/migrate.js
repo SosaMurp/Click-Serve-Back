@@ -12,6 +12,7 @@ const STEPS = [
   { id: '001b_normalizacion_3nf', file: 'clickyserve_3nf_schema.sql' },
   { id: '002_requisitos_moviles', file: 'migrations/002_requisitos_moviles.sql' },
   { id: '003_cobro_en_proceso', file: 'migrations/003_cobro_en_proceso.sql' },
+  { id: '004_verificaciones_ine', file: 'migrations/004_verificaciones_ine.sql' },
 ];
 
 async function migrate(pool = getPool(), { silent = false } = {}) {

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { resetDb, startServer, createUser, api, login, getPool, closePool } = require('./helpers');
 const { totp, generateSecret } = require('../src/lib/totp');
 const { outbox } = require('../src/lib/mailer');
+const { signTicket, registroKey, sha256 } = require('../src/lib/ine/ticket');
 
 let server;
 test.before(async () => { await resetDb(); server = await startServer(); });
@@ -19,6 +20,11 @@ function registroForm(overrides = {}) {
   };
   const form = new FormData();
   for (const [k, v] of Object.entries(data)) if (v !== undefined) form.append(k, v);
+  // La verificación por OCR se prueba en ine-endpoint.test.js; aquí la INE llega ya verificada.
+  const persona = registroKey({ nombre: data.nombre, apellidos: data.apellidos, fecha_nacimiento: data.fechaNacimiento });
+  const ticket = (lado) => signTicket({ lado, hash: sha256(PNG), persona, curp: 'LOXA950510MMNPXN05', fecha_nacimiento: data.fechaNacimiento, sexo: 'M', comprobaciones: [] });
+  form.append('ticket_ine_frente', ticket('frente'));
+  form.append('ticket_ine_reverso', ticket('reverso'));
   form.append('ine_frente', png(), 'frente.png');
   form.append('ine_reverso', png(), 'reverso.png');
   form.append('rostro', png(), 'rostro.png');

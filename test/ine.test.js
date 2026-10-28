@@ -94,3 +94,16 @@ test('los nombres se comparan sin acentos y tolerando errores de lectura', () =>
   assert.equal(namesMatch('PERFZ GARC1A JOSE LUlS', 'José Luis Pérez García'), true);
   assert.equal(namesMatch('JUAN LOPEZ RUIZ', 'José Luis Pérez García'), false);
 });
+
+test('el relleno final de la MRZ que el OCR lee como L vuelve a ser <', () => {
+  const [l1, l2] = ineMrz();
+  const lines = findMrz(`${l1}\n${l2}\nPEREZ<GARCIA<<JOSE<LUIS<<LLLLLL`);
+  assert.equal(lines[2], 'PEREZ<GARCIA<<JOSE<LUIS<<<<<<<');
+});
+
+test('sin INE_PROVIDER el proveedor externo está apagado', async () => {
+  const provider = require('../src/services/ineProvider');
+  delete process.env.INE_PROVIDER;
+  assert.equal(provider.isEnabled(), false);
+  await assert.rejects(provider.validarEnListaNominal({}), { code: 'PROVIDER_DISABLED' });
+});
