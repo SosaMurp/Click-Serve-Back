@@ -8,6 +8,7 @@
     "dev": "nodemon index.js",
     "db:setup": "node scripts/apply-schema.js",
     "db:migrate": "node -e \"require('./src/db/migrate').migrate().then(()=>process.exit(0))\"",
+    "db:seed": "node scripts/seed-demo.js",
     "test": "node --test --test-concurrency=1 --test-timeout=60000 test/*.test.js"
   },
   "keywords": [],

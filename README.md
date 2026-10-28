@@ -16,6 +16,35 @@ exige `JWT_SECRET`, `FILES_SECRET`, `CONEKTA_PRIVATE_KEY` y SMTP, y falla cerrad
 
 Las migraciones (`migrations/` y los `.sql` de la raíz) se aplican solas al arrancar y quedan registradas en `schema_migraciones`.
 
+## Base de datos local desde cero
+
+Los datos no viven en el repositorio; la estructura sí (los `.sql` de la raíz y `migrations/`). Para tener una base
+de desarrollo igual a la del equipo, con las cuentas de prueba:
+
+```bash
+# 1. Base vacía en tu PostgreSQL (17 o similar)
+psql -h localhost -U postgres -c "CREATE DATABASE clickyserve_db"
+
+# 2. En .env: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME=clickyserve_db y NODE_ENV=development
+
+# 3. Estructura: arrancar el backend aplica todas las migraciones (o, sin arrancarlo, npm run db:migrate)
+npm start
+
+# 4. Cuentas de prueba (en otra terminal; se puede repetir sin duplicar nada)
+npm run db:seed
+```
+
+Cuentas que crea `npm run db:seed` (datos ficticios, ya aprobadas y sin 2FA):
+
+| Rol | Correo | Contraseña |
+|---|---|---|
+| Cliente | `cliente.prueba@clickserve.test` | `ClienteTest#2026` |
+| Técnico | `tecnico.prueba@clickserve.test` | `TecnicoTest#2026` |
+
+El seed (`scripts/seed-demo.sql` y `scripts/seed-demo.js`) solo corre con `NODE_ENV=development` o `test`: en
+producción crearía cuentas con contraseñas conocidas. Para empezar de cero: `DROP DATABASE clickyserve_db;` y repetir.
+`npm run db:setup` es el script viejo que solo aplica `clickyserve_db.sql`; usa `npm start` o `npm run db:migrate`.
+
 ## Pruebas
 
 ```bash
